@@ -7,7 +7,7 @@ quiescence search. Java 21, zero external dependencies.
 ## Build & run
 
 ```
-javac --release 21 -d out (Get-ChildItem -Recurse -Filter *.java src | ForEach-Object { $_.FullName })
+javac --release 21 -d out $(find src -name "*.java")
 java -cp out app.Main
 ```
 
