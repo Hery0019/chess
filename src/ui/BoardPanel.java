@@ -29,7 +29,8 @@ import java.util.function.Consumer;
  * re-selects; clicking elsewhere clears. When {@code interactionEnabled} is
  * false (AI thinking, AI-vs-AI, game over) clicks are ignored.
  *
- * When the human plays Black the board is flipped by the visual mapping
+ * When flipped (initially: human plays Black; toggleable at any time via
+ * {@link #setFlipped(boolean)}) the board uses the visual mapping
  * {@code displayIndex = 63 - square} (180° rotation, a-file on the right —
  * the standard flipped orientation).
  */
@@ -45,7 +46,7 @@ public final class BoardPanel extends JPanel {
     private final GameSession session;
     private final PieceRenderer renderer;
     private final Consumer<Move> moveConsumer;
-    private final boolean flipped;
+    private boolean flipped;
 
     private boolean interactionEnabled = false;
     private int selectedSquare = -1;
@@ -61,6 +62,15 @@ public final class BoardPanel extends JPanel {
             @Override public void mousePressed(MouseEvent e) { handleClick(e); }
         });
     }
+
+    /** Changes the visual orientation. Selection stays valid: it is stored in
+     *  board coordinates, only the pixel mapping changes. */
+    public void setFlipped(boolean flipped) {
+        this.flipped = flipped;
+        repaint();
+    }
+
+    public boolean isFlipped() { return flipped; }
 
     public void setInteractionEnabled(boolean enabled) {
         interactionEnabled = enabled;
