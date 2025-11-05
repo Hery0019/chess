@@ -67,7 +67,7 @@ public final class StartScreen extends JPanel {
                 new TimeControl(3), new TimeControl(5), new TimeControl(10),
                 new TimeControl(15), new TimeControl(30)
         });
-        timeControl.setSelectedIndex(3);   // 10 min
+        timeControl.setSelectedIndex(0);   // untimed by default
 
         JSpinner depth = new JSpinner(new SpinnerNumberModel(4, 1, 5, 1));
 
