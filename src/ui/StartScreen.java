@@ -84,8 +84,9 @@ public final class StartScreen extends JPanel {
             "Depth 1 — beginner, instant moves",
             "Depth 2 — casual, instant moves",
             "Depth 3 — club player, quick replies",
-            "Depth 4 — strong, a few seconds per move",
-            "Depth 5 — master, slow but deepest search",
+            "Depth 4 — strong, under a second per move",
+            "Depth 5 — master, about a second per move",
+            "Depth 6 — expert, a few seconds per move",
     };
 
     public StartScreen(Consumer<GameConfig> onStart) {
@@ -109,7 +110,7 @@ public final class StartScreen extends JPanel {
                 times.stream().map(TimeControl::label).toList(), null, 0);   // untimed by default
 
         Segmented<Integer> depth = new Segmented<>(
-                List.of(1, 2, 3, 4, 5), List.of("1", "2", "3", "4", "5"), null, 3);
+                List.of(1, 2, 3, 4, 5, 6), List.of("1", "2", "3", "4", "5", "6"), null, 3);
         JLabel strengthHint = label(STRENGTH_HINTS[depth.value()], font(Font.PLAIN, 12f), MUTED);
         depth.onChange(() -> strengthHint.setText(STRENGTH_HINTS[depth.value()]));
 

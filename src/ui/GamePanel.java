@@ -43,10 +43,17 @@ public final class GamePanel extends JPanel {
     private static final int TIMER_PERIOD_MS = 100;
     /** Minimum wall time per AI move in AI-vs-AI, so games are watchable. */
     private static final long AI_VS_AI_MIN_MOVE_MS = 500;
+    /** Untimed games: the fixed depth decides, this only stops a runaway think. */
+    private static final long UNTIMED_BUDGET_MS = 15_000;
+    /** Clocked games: spend about 1/30 of the remaining time, within bounds. */
+    private static final long CLOCK_FRACTION = 30, MIN_BUDGET_MS = 100, MAX_BUDGET_MS = 8_000;
 
     private final GameConfig config;
     private final GameSession session;
     private final ChessClock clock;
+    /** One engine (and transposition table) per game; findBest is synchronized. */
+    private final Search engine = new Search();
+    private String lastAiInfo;
     private final BoardPanel boardPanel;
     private final JLabel topClockLabel = new JLabel();
     private final JLabel bottomClockLabel = new JLabel();
@@ -197,9 +204,33 @@ public final class GamePanel extends JPanel {
         boardPanel.setInteractionEnabled(false);
         if (activeWorker != null) return;   // one at a time; defensive
         long minMillis = config.mode() == GameConfig.Mode.AI_VS_AI ? AI_VS_AI_MIN_MOVE_MS : 0;
-        activeWorker = new AiWorker(session.board().copy(), config.aiDepth(), minMillis);
+        activeWorker = new AiWorker(session.board().copy(), session.priorPositionKeys(),
+                config.aiDepth(), timeBudgetMillis(stm), minMillis);
         activeWorker.execute();
         refresh();
+    }
+
+    private long timeBudgetMillis(int color) {
+        if (!config.hasClock()) return UNTIMED_BUDGET_MS;
+        long budget = clock.remainingMillis(color) / CLOCK_FRACTION;
+        return Math.max(MIN_BUDGET_MS, Math.min(budget, MAX_BUDGET_MS));
+    }
+
+    /** One-line summary of a finished search, eval from White's point of view. */
+    private static String describe(Search.Result r, int aiColor) {
+        int whiteScore = aiColor == Pieces.WHITE ? r.score() : -r.score();
+        String eval;
+        if (r.isMate()) {
+            int m = aiColor == Pieces.WHITE ? r.mateIn() : -r.mateIn();
+            eval = (m > 0 ? "+M" : "-M") + Math.abs(m);
+        } else {
+            eval = String.format("%+.2f", whiteScore / 100.0);
+        }
+        String nodes = r.nodes() >= 1_000_000 ? String.format("%.1fM", r.nodes() / 1e6)
+                     : r.nodes() >= 1_000     ? (r.nodes() / 1_000) + "k"
+                     : String.valueOf(r.nodes());
+        return String.format("eval %s · depth %d · %s nodes · %.1fs",
+                eval, r.depth(), nodes, r.millis() / 1000.0);
     }
 
     private void togglePause() {
@@ -252,6 +283,7 @@ public final class GamePanel extends JPanel {
             if (boardPanel.hasPremove()) status += "   (premove: " + boardPanel.premoveText() + ")";
         } else {
             status = session.statusText();
+            if (lastAiInfo != null) status += "   ·   AI " + lastAiInfo;
         }
         statusLabel.setText("   " + status);
         boardPanel.repaint();
@@ -259,22 +291,26 @@ public final class GamePanel extends JPanel {
 
     // ---- AI worker ----
 
-    private final class AiWorker extends SwingWorker<Move, Void> {
+    private final class AiWorker extends SwingWorker<Search.Result, Void> {
         final AtomicBoolean cancelFlag = new AtomicBoolean(false);
         private final Board snapshot;
+        private final long[] priorKeys;
         private final int depth;
+        private final long budgetMillis;
         private final long minMillis;
 
-        AiWorker(Board snapshot, int depth, long minMillis) {
+        AiWorker(Board snapshot, long[] priorKeys, int depth, long budgetMillis, long minMillis) {
             this.snapshot = snapshot;
+            this.priorKeys = priorKeys;
             this.depth = depth;
+            this.budgetMillis = budgetMillis;
             this.minMillis = minMillis;
         }
 
         @Override
-        protected Move doInBackground() {
+        protected Search.Result doInBackground() {
             long t0 = System.currentTimeMillis();
-            Search.Result r = new Search().findBest(snapshot, depth, cancelFlag);
+            Search.Result r = engine.findBest(snapshot, depth, budgetMillis, priorKeys, cancelFlag);
             if (r == null) return null;   // cancelled
             // Pacing (AI-vs-AI): instant replies make games unwatchable.
             long elapsed = System.currentTimeMillis() - t0;
@@ -285,7 +321,7 @@ public final class GamePanel extends JPanel {
                     Thread.currentThread().interrupt();
                 }
             }
-            return r.bestMove();
+            return r;
         }
 
         @Override
@@ -295,9 +331,10 @@ public final class GamePanel extends JPanel {
             activeWorker = null;
             if (cancelFlag.get() || session.result().isOver()) { refresh(); return; }
             try {
-                Move m = get();
-                if (m != null) {
-                    session.applyMove(m);   // validates legality as a backstop
+                Search.Result r = get();
+                if (r != null && r.bestMove() != null) {
+                    lastAiInfo = describe(r, snapshot.sideToMove());
+                    session.applyMove(r.bestMove());   // validates legality as a backstop
                     afterMoveApplied();
                 }
             } catch (Exception ex) {

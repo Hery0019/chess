@@ -41,7 +41,7 @@ java -cp out app.Main
 ```bash
 ./test.sh           # or .\test.ps1 — runs the three runners below, headless
 java -cp out test.PerftTest      # engine acceptance gate: 11 standard perft positions
-java -cp out test.EngineTests    # 35 targeted rule / draw / search / zobrist tests
+java -cp out test.EngineTests    # 41 targeted rule / draw / search / zobrist tests
 java -cp out test.UiTests        # Swing views driven by synthetic mouse events
 ```
 
@@ -61,7 +61,7 @@ flag-fall-vs-bare-king draw per FIDE 6.9). Both exit non-zero on failure.
 ## Architecture
 
 ```
-engine/   Board, Move, MoveGenerator, Zobrist, Evaluator, Search, Perft
+engine/   Board, Move, MoveGenerator, Zobrist, Evaluator, Search, TranspositionTable, Perft
           Pure rules + search. Zero dependencies on game/ or ui/. No Swing.
 game/     GameSession, ChessClock, GameConfig, GameResult
           Everything above single-position level: history, repetition table,
@@ -101,16 +101,29 @@ worker harmless. The 100 ms UI timer is a *sampler* only: the clock is
 | Drag state lives in `BoardPanel` alongside click selection | One `(from, targets)` model serves click-click, drag and premove; a drop is just a click on the target | Board is repainted on every drag event (fine at 8x8 with a single glyph) |
 | Full prior Zobrist hash stored in `Undo` | Unconditional unmake correctness for 8 bytes/ply | None meaningful |
 
-## Known limitations (deliberate v1 scope, in priority order for v2)
+### Search (v2)
 
-1. **No transposition table.** The Zobrist infrastructure already exists;
-   a TT is the single biggest playing-strength upgrade available.
-2. **No repetition detection inside the search tree.** The engine may shuffle
-   into a threefold draw in a winning position (the session correctly declares
-   it). Fix alongside the TT via a search-path key stack.
-3. **No iterative deepening / time management.** Depth is fixed; the AI can
-   lose on time at depth 5 in long games with short clocks.
-4. **En-passant file is hashed whenever set**, even if no ep capture is
+- **Iterative deepening with a time budget.** The "AI strength" setting is
+  the maximum depth; with a clock the engine spends about 1/30 of its
+  remaining time per move (100 ms – 8 s) and returns the last completed
+  iteration when the budget runs out, so it no longer loses on time.
+  Untimed games search to the fixed depth with a 15 s safety cap.
+- **Transposition table** (1M entries, Zobrist-keyed, age-aware
+  replacement) — exact/bound cutoffs plus the previous iteration's best move
+  first. One `Search` (and table) lives for the whole game; `findBest` is
+  synchronized and works on a private board copy.
+- **Repetition detection in the tree.** The game's position keys plus the
+  search path form one key stack; a position seen before scores as a draw.
+  A winning engine no longer drifts into threefold, a lost one seeks the
+  perpetual (both covered by tests).
+- Check extension, killer moves, history heuristic, principal variation
+  reported to the UI (eval, depth, nodes, time in the status line).
+
+## Known limitations
+
+1. **En-passant file is hashed whenever set**, even if no ep capture is
    actually legal — repetition detection is conservative (may detect one
    occurrence late; never declares falsely).
-5. **Search is single-threaded** by design (correctness first).
+2. **Search is single-threaded** by design (correctness first).
+3. **No null-move pruning / aspiration windows** — deliberately left out
+   until an engine-vs-engine harness exists to measure them.
