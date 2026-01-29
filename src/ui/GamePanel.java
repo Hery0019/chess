@@ -2,6 +2,7 @@ package ui;
 
 import engine.Board;
 import engine.Move;
+import engine.OpeningBook;
 import engine.Pieces;
 import engine.Search;
 import game.ChessClock;
@@ -17,6 +18,7 @@ import javax.swing.Timer;
 import java.awt.BorderLayout;
 import java.awt.FlowLayout;
 import java.awt.Font;
+import java.util.List;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
@@ -218,6 +220,7 @@ public final class GamePanel extends JPanel {
 
     /** One-line summary of a finished search, eval from White's point of view. */
     private static String describe(Search.Result r, int aiColor) {
+        if (r.depth() == 0) return "book move";
         int whiteScore = aiColor == Pieces.WHITE ? r.score() : -r.score();
         String eval;
         if (r.isMate()) {
@@ -310,7 +313,11 @@ public final class GamePanel extends JPanel {
         @Override
         protected Search.Result doInBackground() {
             long t0 = System.currentTimeMillis();
-            Search.Result r = engine.findBest(snapshot, depth, budgetMillis, priorKeys, cancelFlag);
+            // Opening book first: a book move is reported as depth 0.
+            Move book = OpeningBook.probe(snapshot);
+            Search.Result r = book != null
+                    ? new Search.Result(book, 0, 0, 0, List.of(book), 0)
+                    : engine.findBest(snapshot, depth, budgetMillis, priorKeys, cancelFlag);
             if (r == null) return null;   // cancelled
             // Pacing (AI-vs-AI): instant replies make games unwatchable.
             long elapsed = System.currentTimeMillis() - t0;
