@@ -21,7 +21,7 @@ public final class MainFrame extends JFrame {
         setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
         setLayout(cards);
         add(new StartScreen(this::startGame), "start");
-        setSize(640, 760);
+        setSize(900, 760);
         setLocationRelativeTo(null);
         cards.show(getContentPane(), "start");
     }

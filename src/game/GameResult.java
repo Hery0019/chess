@@ -17,4 +17,14 @@ public enum GameResult {
     GameResult(String message) { this.message = message; }
     public String message() { return message; }
     public boolean isOver() { return this != ONGOING; }
+
+    /** PGN result token: 1-0, 0-1, 1/2-1/2, or * while ongoing. */
+    public String pgnToken() {
+        return switch (this) {
+            case ONGOING -> "*";
+            case WHITE_WINS_MATE, WHITE_WINS_TIMEOUT -> "1-0";
+            case BLACK_WINS_MATE, BLACK_WINS_TIMEOUT -> "0-1";
+            default -> "1/2-1/2";
+        };
+    }
 }

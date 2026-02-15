@@ -37,6 +37,8 @@ public final class GameSession {
     private final Map<Long, Integer> repetitions = new HashMap<>();
     /** Key of every position so far, oldest first, including the current one. */
     private final List<Long> keyHistory = new ArrayList<>();
+    /** SAN of every move in {@link #history}, computed as each move is applied. */
+    private final List<String> sanHistory = new ArrayList<>();
     private GameResult result = GameResult.ONGOING;
     private List<Move> cachedLegal;   // invalidated on every applyMove
 
@@ -53,6 +55,8 @@ public final class GameSession {
     public Board board()            { return board; }
     public GameResult result()      { return result; }
     public List<Move> history()     { return List.copyOf(history); }
+    public List<String> sanHistory(){ return List.copyOf(sanHistory); }
+    public int plyCount()           { return history.size(); }
     public int sideToMove()         { return board.sideToMove(); }
     public Move lastMove()          { return history.isEmpty() ? null : history.get(history.size() - 1); }
 
@@ -87,8 +91,10 @@ public final class GameSession {
                 : "GameSession accessed off the EDT";
         if (result.isOver()) throw new IllegalStateException("game is over");
         if (!legalMoves().contains(m)) throw new IllegalArgumentException("illegal move: " + m);
+        String san = Notation.san(board, m, legalMoves());   // needs the pre-move position
         board.makeMove(m, new Undo());   // undo record discarded; session moves are permanent
         history.add(m);
+        sanHistory.add(san);
         cachedLegal = null;
         repetitions.merge(board.zobristKey(), 1, Integer::sum);
         keyHistory.add(board.zobristKey());
