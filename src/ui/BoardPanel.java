@@ -8,6 +8,7 @@ import game.GameSession;
 import javax.swing.JOptionPane;
 import javax.swing.JPanel;
 import javax.swing.SwingUtilities;
+import javax.swing.Timer;
 import java.awt.BasicStroke;
 import java.awt.Color;
 import java.awt.Cursor;
@@ -101,6 +102,13 @@ public final class BoardPanel extends JPanel {
     // ---- premove ----
     private int premoveFrom = -1, premoveTo = -1;
 
+    // ---- animation ----
+    /** Duration of a piece slide; GamePanel waits this long before playing a premove. */
+    public static final int ANIMATION_MS = 180;
+    private Move anim;                 // move being animated (already applied to the board)
+    private long animStartNanos;
+    private final Timer animTimer = new Timer(15, e -> onAnimationTick());
+
     public BoardPanel(GameSession session, boolean flipped, int humanColor, Consumer<Move> moveConsumer) {
         this.session = session;
         this.flipped = flipped;
@@ -146,6 +154,41 @@ public final class BoardPanel extends JPanel {
         dragSquare = -1;
         dragging = false;
         pressPoint = dragPoint = null;
+    }
+
+    // ---- animation API (used by GamePanel) ----
+
+    /**
+     * Slides the piece of {@code m} from its origin to its destination. The
+     * move must already be applied to the session: the board is painted in
+     * its new state with the moving piece (and the castling rook) drawn at
+     * an interpolated position instead of on its square.
+     */
+    public void animate(Move m) {
+        anim = m;
+        animStartNanos = System.nanoTime();
+        animTimer.start();
+        repaint();
+    }
+
+    public boolean isAnimating() { return anim != null; }
+
+    public void stopAnimation() {
+        anim = null;
+        animTimer.stop();
+        repaint();
+    }
+
+    private void onAnimationTick() {
+        if (animationProgress() >= 1.0) stopAnimation();
+        else repaint();
+    }
+
+    /** 0..1, eased out so the piece decelerates into its square. */
+    private double animationProgress() {
+        double t = (System.nanoTime() - animStartNanos) / (ANIMATION_MS * 1_000_000.0);
+        t = Math.max(0.0, Math.min(1.0, t));
+        return 1.0 - (1.0 - t) * (1.0 - t);
     }
 
     // ---- premove API (used by GamePanel) ----
@@ -225,7 +268,7 @@ public final class BoardPanel extends JPanel {
 
         // A press on a highlighted destination completes the move (click-click).
         if (selectedSquare >= 0 && targetAt(sq) != null) {
-            commitMove(selectedSquare, sq, mode);
+            commitMove(selectedSquare, sq, mode, false);
             return;
         }
 
@@ -274,7 +317,7 @@ public final class BoardPanel extends JPanel {
         } else if (sq == from) {
             // Dropped back where it came from: stay selected (click-click continues).
         } else if (sq >= 0 && targetAt(sq) != null) {
-            commitMove(from, sq, mode);
+            commitMove(from, sq, mode, true);
             return;
         } else {
             clearSelection();   // snap back
@@ -308,9 +351,10 @@ public final class BoardPanel extends JPanel {
     /**
      * Records a premove, or resolves and submits a real move. In MOVE mode
      * the (from, to) pair maps to exactly one legal move except for
-     * promotions, where a modal dialog picks the piece.
+     * promotions, where a modal dialog picks the piece. A move entered by
+     * click-click is animated; a dropped piece is already on its square.
      */
-    private void commitMove(int from, int to, InputMode mode) {
+    private void commitMove(int from, int to, InputMode mode, boolean dropped) {
         clearSelection();
         if (mode == InputMode.PREMOVE) {
             premoveFrom = from;
@@ -323,7 +367,10 @@ public final class BoardPanel extends JPanel {
         repaint();
         if (matching.isEmpty()) return;   // stale selection; nothing to do
         Move chosen = matching.size() == 1 ? matching.get(0) : choosePromotion(matching);
-        if (chosen != null) moveConsumer.accept(chosen);
+        if (chosen == null) return;
+        moveConsumer.accept(chosen);
+        // Animate only if the consumer actually played it (it may refuse).
+        if (!dropped && chosen.equals(session.lastMove())) animate(chosen);
     }
 
     /**
@@ -491,12 +538,22 @@ public final class BoardPanel extends JPanel {
 
         drawCoordinates(g, s);
 
+        // Squares whose piece is currently sliding (moving piece + castling rook).
+        int animTo = anim != null ? anim.to() : -1;
+        int rookTo = anim != null && anim.isCastle() ? (anim.to() > anim.from() ? anim.from() + 1 : anim.from() - 1) : -1;
+
         for (int sq = 0; sq < 64; sq++) {
             int p = session.board().pieceAt(sq);
             if (p == EMPTY) continue;
             if (dragging && sq == dragSquare) continue;                              // in the air
             if (showPremove && (sq == premoveFrom || sq == premoveTo)) continue;    // ghosted below
+            if (sq == animTo || sq == rookTo) continue;                              // sliding below
             renderer.draw(g, p, xOf(sq), yOf(sq), s);
+        }
+        if (anim != null) {
+            double t = animationProgress();
+            drawSliding(g, anim.from(), anim.to(), t, s);
+            if (rookTo >= 0) drawSliding(g, anim.to() > anim.from() ? anim.from() + 3 : anim.from() - 4, rookTo, t, s);
         }
         if (showPremove) {
             // Ghost: the premoved piece is shown on its destination (the
@@ -525,6 +582,15 @@ public final class BoardPanel extends JPanel {
                 renderer.draw(g, p, dragPoint.x - size / 2, dragPoint.y - size / 2, size);
             }
         }
+    }
+
+    /** Draws the piece now standing on {@code to} at a point {@code t} of the way from {@code from}. */
+    private void drawSliding(Graphics2D g, int from, int to, double t, int s) {
+        int p = session.board().pieceAt(to);
+        if (p == EMPTY) return;   // e.g. taken back mid-animation
+        int x = (int) Math.round(xOf(from) + (xOf(to) - xOf(from)) * t);
+        int y = (int) Math.round(yOf(from) + (yOf(to) - yOf(from)) * t);
+        renderer.draw(g, p, x, y, s);
     }
 
     private void drawCoordinates(Graphics2D g, int s) {
