@@ -19,6 +19,8 @@ quiescence search. Java 21, zero external dependencies.
   a queen), otherwise it is silently dropped. Any left-click on the board
   cancels a pending premove (and may start a new one); right-click cancels
   without selecting. One premove is held at a time.
+- **Promotion** opens a strip of four pieces on the board starting at the
+  promotion square; click one to promote, click anywhere else to cancel.
 - **Undo** (Ctrl+Z, Human vs AI): takes back your last move and the AI's
   reply — also while the AI is thinking, or after the game has ended.
 - **Move list** in standard algebraic notation beside the board, and

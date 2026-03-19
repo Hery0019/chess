@@ -5,7 +5,6 @@ import engine.Move;
 import engine.Pieces;
 import game.GameSession;
 
-import javax.swing.JOptionPane;
 import javax.swing.JPanel;
 import javax.swing.SwingUtilities;
 import javax.swing.Timer;
@@ -56,6 +55,12 @@ import static engine.Pieces.*;
  * silently dropped. One premove is held at a time; any click on the board
  * cancels it (a right-click cancels without selecting anything).
  *
+ * <h2>Promotion</h2>
+ * Moving a pawn to the last rank opens an on-board strip of four pieces
+ * (queen, knight, rook, bishop) starting on the promotion square and
+ * running towards the middle of the board. Clicking a piece plays that
+ * promotion; clicking anywhere else cancels the move.
+ *
  * When flipped (initially: human plays Black; toggleable at any time via
  * {@link #setFlipped(boolean)}) the board uses the visual mapping
  * {@code displayIndex = 63 - square} (180° rotation, a-file on the right —
@@ -101,6 +106,16 @@ public final class BoardPanel extends JPanel {
 
     // ---- premove ----
     private int premoveFrom = -1, premoveTo = -1;
+
+    // ---- promotion picker ----
+    /** Order of the choices in the on-board strip, top to bottom from the promotion square. */
+    private static final int[] PROMOTION_ORDER = {QUEEN, KNIGHT, ROOK, BISHOP};
+    private static final Color PICKER_DIM = new Color(0, 0, 0, 90);
+    private static final Color PICKER_BG = new Color(0xFF, 0xFF, 0xFF, 235);
+    private static final Color PICKER_HOVER = new Color(0xF0, 0x6E, 0x5F, 200);
+    private List<Move> promotionChoices;    // pending promotion moves (same from/to), or null
+    private boolean promotionDropped;       // entered by drag (no animation) or by click
+    private int promotionHover = -1;        // hovered strip cell, or -1
 
     // ---- animation ----
     /** Duration of a piece slide; GamePanel waits this long before playing a premove. */
@@ -154,7 +169,12 @@ public final class BoardPanel extends JPanel {
         dragSquare = -1;
         dragging = false;
         pressPoint = dragPoint = null;
+        promotionChoices = null;
+        promotionHover = -1;
     }
+
+    /** True while the promotion strip is waiting for a choice. */
+    public boolean isChoosingPromotion() { return promotionChoices != null; }
 
     // ---- animation API (used by GamePanel) ----
 
@@ -251,6 +271,16 @@ public final class BoardPanel extends JPanel {
     private void onPress(MouseEvent e) {
         InputMode mode = mode();
         if (mode == InputMode.NONE) return;
+        if (promotionChoices != null) {
+            // The strip is modal for the board: a cell picks, anything else cancels.
+            int cell = SwingUtilities.isLeftMouseButton(e) ? promotionCellAt(e.getX(), e.getY()) : -1;
+            List<Move> choices = promotionChoices;
+            boolean dropped = promotionDropped;
+            clearSelection();
+            repaint();
+            if (cell >= 0) submit(promotionMove(choices, PROMOTION_ORDER[cell]), dropped);
+            return;
+        }
         if (SwingUtilities.isRightMouseButton(e)) {
             cancelPremove();
             clearSelection();
@@ -327,6 +357,12 @@ public final class BoardPanel extends JPanel {
 
     private void updateCursor(MouseEvent e) {
         InputMode mode = mode();
+        if (promotionChoices != null) {
+            int cell = promotionCellAt(e.getX(), e.getY());
+            if (cell != promotionHover) { promotionHover = cell; repaint(); }
+            setCursor(cell >= 0 ? Cursor.getPredefinedCursor(Cursor.HAND_CURSOR) : Cursor.getDefaultCursor());
+            return;
+        }
         int sq = squareAt(e.getX(), e.getY());
         boolean grabbable = mode != InputMode.NONE && sq >= 0 && isOwnPiece(sq, mode);
         setCursor(grabbable ? Cursor.getPredefinedCursor(Cursor.HAND_CURSOR) : Cursor.getDefaultCursor());
@@ -351,8 +387,9 @@ public final class BoardPanel extends JPanel {
     /**
      * Records a premove, or resolves and submits a real move. In MOVE mode
      * the (from, to) pair maps to exactly one legal move except for
-     * promotions, where a modal dialog picks the piece. A move entered by
-     * click-click is animated; a dropped piece is already on its square.
+     * promotions, where the on-board strip asks for the piece first. A move
+     * entered by click-click is animated; a dropped piece is already on its
+     * square.
      */
     private void commitMove(int from, int to, InputMode mode, boolean dropped) {
         clearSelection();
@@ -364,28 +401,68 @@ public final class BoardPanel extends JPanel {
         }
         List<Move> matching = new ArrayList<>();
         for (Move m : session.legalMoves()) if (m.from() == from && m.to() == to) matching.add(m);
+        if (matching.size() > 1) {
+            // Promotion: keep the candidates, show the strip, wait for a click.
+            promotionChoices = matching;
+            promotionDropped = dropped;
+            promotionHover = -1;
+            repaint();
+            return;
+        }
         repaint();
-        if (matching.isEmpty()) return;   // stale selection; nothing to do
-        Move chosen = matching.size() == 1 ? matching.get(0) : choosePromotion(matching);
-        if (chosen == null) return;
+        if (!matching.isEmpty()) submit(matching.get(0), dropped);
+    }
+
+    private void submit(Move chosen, boolean dropped) {
         moveConsumer.accept(chosen);
         // Animate only if the consumer actually played it (it may refuse).
         if (!dropped && chosen.equals(session.lastMove())) animate(chosen);
     }
 
-    /**
-     * Promotion choice (approved decision #6): the four candidate moves for
-     * the clicked destination differ only in promotion piece; a modal dialog
-     * picks among them. Cancelling aborts the move entirely.
-     */
-    private Move choosePromotion(List<Move> candidates) {
-        String[] options = {"Queen", "Rook", "Bishop", "Knight"};
-        int[] types = {QUEEN, ROOK, BISHOP, KNIGHT};
-        int choice = JOptionPane.showOptionDialog(this, "Promote pawn to:", "Promotion",
-                JOptionPane.DEFAULT_OPTION, JOptionPane.QUESTION_MESSAGE, null, options, options[0]);
-        if (choice < 0) return null;
-        for (Move m : candidates) if (m.promotion() == types[choice]) return m;
+    private static Move promotionMove(List<Move> candidates, int pieceType) {
+        for (Move m : candidates) if (m.promotion() == pieceType) return m;
         throw new IllegalStateException("promotion candidates incomplete");
+    }
+
+    // ---- promotion strip geometry ----
+
+    /** The strip runs from the promotion square towards the middle of the board. */
+    private int promotionDirection() {
+        return yOf(promotionChoices.get(0).to()) == 0 ? 1 : -1;
+    }
+
+    private int promotionCellAt(int px, int py) {
+        int s = squareSize();
+        if (s == 0) return -1;
+        int to = promotionChoices.get(0).to();
+        int x = xOf(to), y0 = yOf(to), dir = promotionDirection();
+        if (px < x || px >= x + s) return -1;
+        for (int i = 0; i < PROMOTION_ORDER.length; i++) {
+            int y = y0 + dir * i * s;
+            if (py >= y && py < y + s) return i;
+        }
+        return -1;
+    }
+
+    private void paintPromotionStrip(Graphics2D g, int s) {
+        g.setColor(PICKER_DIM);
+        g.fillRect(0, 0, 8 * s, 8 * s);
+        int to = promotionChoices.get(0).to();
+        int color = colorOf(promotionChoices.get(0).piece());
+        int x = xOf(to), y0 = yOf(to), dir = promotionDirection();
+        int top = dir > 0 ? y0 : y0 - 3 * s;
+        g.setColor(new Color(0, 0, 0, 80));
+        g.fillRoundRect(x + 3, top + 4, s, 4 * s, s / 4, s / 4);
+        g.setColor(PICKER_BG);
+        g.fillRoundRect(x, top, s, 4 * s, s / 4, s / 4);
+        for (int i = 0; i < PROMOTION_ORDER.length; i++) {
+            int y = y0 + dir * i * s;
+            if (i == promotionHover) {
+                g.setColor(PICKER_HOVER);
+                g.fillRoundRect(x + 2, y + 2, s - 4, s - 4, s / 5, s / 5);
+            }
+            renderer.draw(g, Pieces.make(PROMOTION_ORDER[i], color), x, y, s);
+        }
     }
 
     // ---- premove geometry ----
@@ -582,6 +659,8 @@ public final class BoardPanel extends JPanel {
                 renderer.draw(g, p, dragPoint.x - size / 2, dragPoint.y - size / 2, size);
             }
         }
+
+        if (promotionChoices != null) paintPromotionStrip(g, s);
     }
 
     /** Draws the piece now standing on {@code to} at a point {@code t} of the way from {@code from}. */
