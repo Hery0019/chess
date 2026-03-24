@@ -38,6 +38,7 @@ public final class UiTests {
                 boardPremoves();
                 boardFlippedGeometry();
                 boardPromotionStrip();
+                boardAnnotations();
                 boardPaintsInEveryState();
                 startScreenEmitsConfig();
             } catch (Exception e) {
@@ -227,6 +228,41 @@ public final class UiTests {
         click(p, sq("a8"));
         p.paint(new BufferedImage(400, 400, BufferedImage.TYPE_INT_RGB).getGraphics());
         check("promotion: strip paints", p.isChoosingPromotion());
+    }
+
+    // ---- BoardPanel: right-click marks and arrows ----
+
+    private static void boardAnnotations() {
+        GameSession session = new GameSession();
+        List<Move> received = new ArrayList<>();
+        BoardPanel p = newBoard(session, false, Pieces.WHITE, received);
+        p.setInteractionEnabled(true);
+
+        rightClick(p, sq("e4"), sq("e4"));
+        check("annotations: right-click marks a square", p.annotationCount() == 1);
+        rightClick(p, sq("e4"), sq("e4"));
+        check("annotations: right-click again removes the mark", p.annotationCount() == 0);
+        rightClick(p, sq("g1"), sq("f3"));
+        rightClick(p, sq("e2"), sq("e4"));
+        check("annotations: right-drag draws arrows", p.annotationCount() == 2);
+        rightClick(p, sq("g1"), sq("f3"));
+        check("annotations: same arrow again removes it", p.annotationCount() == 1);
+        p.paint(new BufferedImage(400, 400, BufferedImage.TYPE_INT_RGB).getGraphics());
+        click(p, sq("d2"));
+        check("annotations: left click clears everything", p.annotationCount() == 0);
+        check("annotations: the left click still selects", received.isEmpty());
+        click(p, sq("d4"));
+        check("annotations: play continues normally", submitted(received, "d2d4"));
+
+        // Also available while the board is not interactive.
+        p.setInteractionEnabled(false);
+        rightClick(p, sq("a1"), sq("h8"));
+        check("annotations: arrows allowed while not interactive", p.annotationCount() == 1);
+    }
+
+    private static void rightClick(BoardPanel p, int from, int to) {
+        press(p, from, MouseEvent.BUTTON3);
+        p.dispatchEvent(new MouseEvent(p, MouseEvent.MOUSE_RELEASED, 0, 0, px(to), py(to), 1, false, MouseEvent.BUTTON3));
     }
 
     // ---- BoardPanel: painting never throws ----

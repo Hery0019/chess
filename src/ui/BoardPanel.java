@@ -55,6 +55,12 @@ import static engine.Pieces.*;
  * silently dropped. One premove is held at a time; any click on the board
  * cancels it (a right-click cancels without selecting anything).
  *
+ * <h2>Annotations</h2>
+ * Right-click a square to highlight it, right-drag between two squares to
+ * draw an arrow; doing the same again removes it. Any left-click or move
+ * clears all annotations. Available in every mode, even when the board is
+ * not interactive.
+ *
  * <h2>Promotion</h2>
  * Moving a pawn to the last rank opens an on-board strip of four pieces
  * (queen, knight, rook, bishop) starting on the promotion square and
@@ -106,6 +112,13 @@ public final class BoardPanel extends JPanel {
 
     // ---- premove ----
     private int premoveFrom = -1, premoveTo = -1;
+
+    // ---- annotations (right-click) ----
+    private static final Color MARK = new Color(0xEB, 0x61, 0x50, 170);
+    private static final Color ARROW = new Color(0x15, 0x78, 0x1B, 200);
+    private final java.util.Set<Integer> markedSquares = new java.util.LinkedHashSet<>();
+    private final List<int[]> arrows = new ArrayList<>();   // {from, to}
+    private int annotationFrom = -1;                        // square of the right-button press
 
     // ---- promotion picker ----
     /** Order of the choices in the on-board strip, top to bottom from the promotion square. */
@@ -176,6 +189,29 @@ public final class BoardPanel extends JPanel {
     /** True while the promotion strip is waiting for a choice. */
     public boolean isChoosingPromotion() { return promotionChoices != null; }
 
+    // ---- annotation API ----
+
+    /** Number of user marks currently drawn (highlighted squares + arrows). */
+    public int annotationCount() { return markedSquares.size() + arrows.size(); }
+
+    public void clearAnnotations() {
+        markedSquares.clear();
+        arrows.clear();
+        annotationFrom = -1;
+        repaint();
+    }
+
+    private void toggleMark(int sq) {
+        if (!markedSquares.remove(sq)) markedSquares.add(sq);
+    }
+
+    private void toggleArrow(int from, int to) {
+        for (int i = 0; i < arrows.size(); i++) {
+            if (arrows.get(i)[0] == from && arrows.get(i)[1] == to) { arrows.remove(i); return; }
+        }
+        arrows.add(new int[]{from, to});
+    }
+
     // ---- animation API (used by GamePanel) ----
 
     /**
@@ -188,6 +224,7 @@ public final class BoardPanel extends JPanel {
         anim = m;
         animStartNanos = System.nanoTime();
         animTimer.start();
+        clearAnnotations();   // marks refer to the previous position
         repaint();
     }
 
@@ -270,6 +307,17 @@ public final class BoardPanel extends JPanel {
 
     private void onPress(MouseEvent e) {
         InputMode mode = mode();
+        if (SwingUtilities.isRightMouseButton(e)) {
+            // Right button: cancel whatever is pending and start an annotation
+            // (a mark on release over the same square, an arrow otherwise).
+            // Allowed even when the board is not interactive (game over, AI vs AI).
+            cancelPremove();
+            clearSelection();
+            annotationFrom = squareAt(e.getX(), e.getY());
+            repaint();
+            return;
+        }
+        if (SwingUtilities.isLeftMouseButton(e) && annotationCount() > 0) clearAnnotations();
         if (mode == InputMode.NONE) return;
         if (promotionChoices != null) {
             // The strip is modal for the board: a cell picks, anything else cancels.
@@ -279,12 +327,6 @@ public final class BoardPanel extends JPanel {
             clearSelection();
             repaint();
             if (cell >= 0) submit(promotionMove(choices, PROMOTION_ORDER[cell]), dropped);
-            return;
-        }
-        if (SwingUtilities.isRightMouseButton(e)) {
-            cancelPremove();
-            clearSelection();
-            repaint();
             return;
         }
         if (!SwingUtilities.isLeftMouseButton(e)) return;
@@ -325,6 +367,16 @@ public final class BoardPanel extends JPanel {
     }
 
     private void onRelease(MouseEvent e) {
+        if (annotationFrom >= 0 && e.getButton() == MouseEvent.BUTTON3) {
+            int sq = squareAt(e.getX(), e.getY());
+            if (sq >= 0) {
+                if (sq == annotationFrom) toggleMark(sq);
+                else toggleArrow(annotationFrom, sq);
+            }
+            annotationFrom = -1;
+            repaint();
+            return;
+        }
         if (dragSquare < 0) return;
         int from = dragSquare;
         boolean wasDragging = dragging;
@@ -414,6 +466,7 @@ public final class BoardPanel extends JPanel {
     }
 
     private void submit(Move chosen, boolean dropped) {
+        clearAnnotations();
         moveConsumer.accept(chosen);
         // Animate only if the consumer actually played it (it may refuse).
         if (!dropped && chosen.equals(session.lastMove())) animate(chosen);
@@ -605,6 +658,9 @@ public final class BoardPanel extends JPanel {
             g.fillRect(xOf(selectedSquare), yOf(selectedSquare), s, s);
         }
 
+        g.setColor(MARK);
+        for (int sq : markedSquares) g.fillRect(xOf(sq), yOf(sq), s, s);
+
         int hover = dragging ? squareAt(dragPoint.x, dragPoint.y) : -1;
         if (hover >= 0) {
             g.setColor(HOVER);
@@ -638,6 +694,8 @@ public final class BoardPanel extends JPanel {
             renderer.draw(g, session.board().pieceAt(premoveFrom), xOf(premoveTo), yOf(premoveTo), s);
         }
 
+        for (int[] a : arrows) drawArrow(g, a[0], a[1], s);
+
         // Destination markers drawn over the pieces: dot on empty squares,
         // ring on captures.
         for (Target t : targets) {
@@ -661,6 +719,29 @@ public final class BoardPanel extends JPanel {
         }
 
         if (promotionChoices != null) paintPromotionStrip(g, s);
+    }
+
+    /** Thick translucent arrow between square centres, shortened so the head sits inside the target. */
+    private void drawArrow(Graphics2D g, int from, int to, int s) {
+        double x1 = xOf(from) + s / 2.0, y1 = yOf(from) + s / 2.0;
+        double x2 = xOf(to) + s / 2.0, y2 = yOf(to) + s / 2.0;
+        double dx = x2 - x1, dy = y2 - y1, len = Math.hypot(dx, dy);
+        if (len == 0) return;
+        double ux = dx / len, uy = dy / len;
+        double head = s * 0.42, width = s / 7.0;
+        // Start a little away from the centre so the tail does not cover the piece.
+        double sx = x1 + ux * s * 0.3, sy = y1 + uy * s * 0.3;
+        double bx = x2 - ux * head, by = y2 - uy * head;   // base of the head
+        g.setColor(ARROW);
+        g.setStroke(new BasicStroke((float) width, BasicStroke.CAP_BUTT, BasicStroke.JOIN_MITER));
+        g.draw(new java.awt.geom.Line2D.Double(sx, sy, bx, by));
+        java.awt.geom.Path2D.Double tip = new java.awt.geom.Path2D.Double();
+        double hw = head * 0.6;   // half-width of the head
+        tip.moveTo(x2, y2);
+        tip.lineTo(bx - uy * hw, by + ux * hw);
+        tip.lineTo(bx + uy * hw, by - ux * hw);
+        tip.closePath();
+        g.fill(tip);
     }
 
     /** Draws the piece now standing on {@code to} at a point {@code t} of the way from {@code from}. */
