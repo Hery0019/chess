@@ -27,6 +27,9 @@ quiescence search. Java 21, zero external dependencies.
   reply — also while the AI is thinking, or after the game has ended.
 - **Move list** in standard algebraic notation beside the board, and
   **Export PGN…** to save the game (seven-tag roster + move text).
+- **Sounds** for move, capture, check and game end — synthesised at
+  start-up (no audio files), switchable with the Sound checkbox, silent
+  when no audio device exists.
 - **Flip Board** rotates the view; **New Game** returns to the start screen.
 
 ## Build & run
@@ -75,7 +78,7 @@ engine/   Board, Move, MoveGenerator, Zobrist, Evaluator, Search, TranspositionT
 game/     GameSession, ChessClock, GameConfig, GameResult, Notation (SAN / PGN)
           Everything above single-position level: history, repetition table,
           draw adjudication, clocks, timeout verdicts. No Swing widgets.
-ui/       MainFrame, StartScreen, GamePanel, BoardPanel, PieceRenderer
+ui/       MainFrame, StartScreen, GamePanel, BoardPanel, PieceRenderer, Sounds
           Swing only. Never mutates engine state directly — all moves flow
           through GameSession.
 app/      Main (EDT bootstrap)

@@ -13,6 +13,7 @@ import game.Notation;
 import javax.swing.AbstractAction;
 import javax.swing.BorderFactory;
 import javax.swing.JButton;
+import javax.swing.JCheckBox;
 import javax.swing.JComponent;
 import javax.swing.JFileChooser;
 import javax.swing.JLabel;
@@ -151,6 +152,12 @@ public final class GamePanel extends JPanel {
         JLabel title = new JLabel("Moves");
         title.setFont(title.getFont().deriveFont(Font.BOLD, 14f));
         title.setBorder(BorderFactory.createEmptyBorder(6, 2, 0, 0));
+        JCheckBox sound = new JCheckBox("Sound", Sounds.isEnabled());
+        sound.setFocusable(false);
+        sound.addActionListener(e -> Sounds.setEnabled(sound.isSelected()));
+        JPanel header = new JPanel(new BorderLayout());
+        header.add(title, BorderLayout.WEST);
+        header.add(sound, BorderLayout.EAST);
 
         moveTable.setRowHeight(22);
         moveTable.setShowGrid(false);
@@ -191,7 +198,7 @@ public final class GamePanel extends JPanel {
             @Override public void actionPerformed(ActionEvent e) { if (undoButton.isVisible()) undo(); }
         });
 
-        side.add(title, BorderLayout.NORTH);
+        side.add(header, BorderLayout.NORTH);
         side.add(scroll, BorderLayout.CENTER);
         side.add(buttons, BorderLayout.SOUTH);
         return side;
@@ -264,6 +271,7 @@ public final class GamePanel extends JPanel {
     }
 
     private void afterMoveApplied() {
+        playMoveSound();
         if (session.result().isOver()) {
             endGame();
         } else {
@@ -271,6 +279,16 @@ public final class GamePanel extends JPanel {
             maybeStartAi();
         }
         refresh();
+    }
+
+    private void playMoveSound() {
+        Move last = session.lastMove();
+        if (last == null) return;
+        Sounds.Kind kind = session.result().isOver() ? Sounds.Kind.GAME_END
+                         : session.inCheckNow()      ? Sounds.Kind.CHECK
+                         : last.isCapture()          ? Sounds.Kind.CAPTURE
+                         : Sounds.Kind.MOVE;
+        Sounds.play(kind);
     }
 
     private void endGame() {
@@ -415,6 +433,7 @@ public final class GamePanel extends JPanel {
                     activeWorker = null;
                 }
                 session.timeout(running);
+                Sounds.play(Sounds.Kind.GAME_END);
                 endGame();
             }
         }
