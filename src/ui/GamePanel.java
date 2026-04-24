@@ -9,6 +9,7 @@ import game.ChessClock;
 import game.GameConfig;
 import game.GameSession;
 import game.Notation;
+import game.SavedGame;
 
 import javax.swing.AbstractAction;
 import javax.swing.BorderFactory;
@@ -66,6 +67,14 @@ import java.util.concurrent.atomic.AtomicBoolean;
  */
 public final class GamePanel extends JPanel {
 
+    /** What the panel needs from the application shell. */
+    public interface Host {
+        /** Back to the start screen. */
+        void newGame();
+        /** Start a fresh game with this configuration (rematch). */
+        void startGame(GameConfig config);
+    }
+
     private static final int TIMER_PERIOD_MS = 100;
     /** Minimum wall time per AI move in AI-vs-AI, so games are watchable. */
     private static final long AI_VS_AI_MIN_MOVE_MS = 500;
@@ -75,6 +84,7 @@ public final class GamePanel extends JPanel {
     private static final long CLOCK_FRACTION = 30, MIN_BUDGET_MS = 100, MAX_BUDGET_MS = 8_000;
 
     private final GameConfig config;
+    private final Host host;
     private final GameSession session;
     private final ChessClock clock;
     /** One engine (and transposition table) per game; findBest is synchronized. */
@@ -96,14 +106,29 @@ public final class GamePanel extends JPanel {
     private AiWorker activeWorker;
     private boolean paused = false;
     private boolean disposed = false;
+    private boolean endDialogShown = false;
 
-    public GamePanel(GameConfig config, Runnable onNewGame) {
+    /**
+     * @param saved a game to resume, or null for a fresh one
+     * @throws IllegalArgumentException if the saved moves are not a legal sequence
+     */
+    public GamePanel(GameConfig config, SavedGame saved, Host host) {
         super(new BorderLayout(8, 8));
         this.config = config;
+        this.host = host;
         this.session = new GameSession();
         // Untimed games keep a clock object so the tick/pause/label flow is
         // unchanged; it simply never expires and displays elapsed time.
         this.clock = config.hasClock() ? new ChessClock(config.millisPerSide()) : ChessClock.unlimited();
+        if (saved != null) {
+            for (String lan : saved.moves()) {
+                Move move = null;
+                for (Move m : session.legalMoves()) if (m.toString().equals(lan)) { move = m; break; }
+                if (move == null) throw new IllegalArgumentException("saved game: illegal move " + lan);
+                session.applyMove(move);
+            }
+            clock.restoreUsed(saved.whiteUsedMillis(), saved.blackUsedMillis());
+        }
 
         boolean flipped = config.mode() == GameConfig.Mode.HUMAN_VS_AI
                 && config.humanColor() == Pieces.BLACK;
@@ -139,13 +164,13 @@ public final class GamePanel extends JPanel {
 
         setBorder(BorderFactory.createEmptyBorder(8, 8, 8, 8));
         add(center, BorderLayout.CENTER);
-        add(buildSidePanel(onNewGame), BorderLayout.EAST);
+        add(buildSidePanel(), BorderLayout.EAST);
 
         uiTimer = new Timer(TIMER_PERIOD_MS, e -> onTick());
     }
 
     /** Move list plus the game controls, to the right of the board. */
-    private JComponent buildSidePanel(Runnable onNewGame) {
+    private JComponent buildSidePanel() {
         JPanel side = new JPanel(new BorderLayout(0, 8));
         side.setPreferredSize(new Dimension(250, 0));
 
@@ -182,12 +207,16 @@ public final class GamePanel extends JPanel {
         flipBoard.addActionListener(e -> flipBoard());
         JButton exportPgn = new JButton("Export PGN…");
         exportPgn.addActionListener(e -> exportPgn());
+        JButton save = new JButton("Save…");
+        save.setToolTipText("Save this game to resume it later");
+        save.addActionListener(e -> saveGame());
         JButton newGame = new JButton("New Game");
-        newGame.addActionListener(e -> onNewGame.run());
+        newGame.addActionListener(e -> host.newGame());
 
         JPanel buttons = new JPanel(new GridLayout(0, 2, 6, 6));
         buttons.add(aiVsAi ? pauseButton : undoButton);
         buttons.add(flipBoard);
+        buttons.add(save);
         buttons.add(exportPgn);
         buttons.add(newGame);
 
@@ -229,18 +258,42 @@ public final class GamePanel extends JPanel {
     }
 
     private void exportPgn() {
+        writeToChosenFile("Export PGN", "game.pgn",
+                Notation.pgn(session, pgnName(Pieces.WHITE), pgnName(Pieces.BLACK)));
+    }
+
+    private void saveGame() {
+        writeToChosenFile("Save game", "game.chess", SavedGame.of(config, session, clock).serialize());
+    }
+
+    private void writeToChosenFile(String title, String defaultName, String content) {
         JFileChooser chooser = new JFileChooser();
-        chooser.setDialogTitle("Export PGN");
-        chooser.setSelectedFile(new java.io.File("game.pgn"));
+        chooser.setDialogTitle(title);
+        chooser.setSelectedFile(new java.io.File(defaultName));
         if (chooser.showSaveDialog(this) != JFileChooser.APPROVE_OPTION) return;
         Path target = chooser.getSelectedFile().toPath();
         try {
-            Files.writeString(target, Notation.pgn(session, pgnName(Pieces.WHITE), pgnName(Pieces.BLACK)),
-                    StandardCharsets.UTF_8);
+            Files.writeString(target, content, StandardCharsets.UTF_8);
         } catch (IOException ex) {
             JOptionPane.showMessageDialog(this, "Could not write " + target + ":\n" + ex.getMessage(),
-                    "Export PGN", JOptionPane.ERROR_MESSAGE);
+                    title, JOptionPane.ERROR_MESSAGE);
         }
+    }
+
+    /** Shown once per game end (after the last slide): rematch, new game, or stay and review. */
+    private void showEndDialog() {
+        if (disposed || !session.result().isOver()) return;
+        String[] options = {"Rematch", "New Game", "Review"};
+        int choice = JOptionPane.showOptionDialog(this, session.result().message(), "Game over",
+                JOptionPane.DEFAULT_OPTION, JOptionPane.INFORMATION_MESSAGE, null, options, options[0]);
+        if (choice == 0) host.startGame(rematchConfig());
+        else if (choice == 1) host.newGame();
+    }
+
+    /** Same settings, colours swapped (Human vs AI). */
+    private GameConfig rematchConfig() {
+        if (config.mode() != GameConfig.Mode.HUMAN_VS_AI) return config;
+        return new GameConfig(config.mode(), config.humanColor() ^ 1, config.minutesPerSide(), config.aiDepth());
     }
 
     /** Called once by MainFrame after the panel is shown. */
@@ -248,7 +301,8 @@ public final class GamePanel extends JPanel {
         clock.startTurn(session.sideToMove());
         refresh();
         uiTimer.start();
-        maybeStartAi();
+        if (session.result().isOver()) endGame();   // a resumed game that had already finished
+        else maybeStartAi();
     }
 
     /** Stops timers and abandons any in-flight search. Idempotent. */
@@ -296,6 +350,12 @@ public final class GamePanel extends JPanel {
         boardPanel.setInteractionEnabled(false);
         // The timer keeps running only to no purpose; stop it.
         uiTimer.stop();
+        if (!endDialogShown) {
+            endDialogShown = true;
+            Timer t = new Timer(BoardPanel.ANIMATION_MS + 250, e -> showEndDialog());
+            t.setRepeats(false);
+            t.start();
+        }
     }
 
     /** Number of plies a takeback removes right now, 0 when nothing can be taken back. */
@@ -332,7 +392,10 @@ public final class GamePanel extends JPanel {
         boardPanel.cancelPremove();
         boardPanel.clearSelection();
         lastAiInfo = null;
-        if (wasOver && !uiTimer.isRunning()) uiTimer.start();
+        if (wasOver) {
+            endDialogShown = false;   // the game may end again
+            if (!uiTimer.isRunning()) uiTimer.start();
+        }
         clock.startTurn(session.sideToMove());
         maybeStartAi();
         refresh();

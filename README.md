@@ -30,6 +30,11 @@ quiescence search. Java 21, zero external dependencies.
 - **Sounds** for move, capture, check and game end — synthesised at
   start-up (no audio files), switchable with the Sound checkbox, silent
   when no audio device exists.
+- **Save… / Resume a saved game…** write and reload a small text file
+  (`.chess`: settings, clocks, moves in long algebraic notation, replayed
+  and validated on load).
+- **Game over** dialog offers a rematch (colours swapped), a new game, or
+  staying on the final position to review it.
 - **Flip Board** rotates the view; **New Game** returns to the start screen.
 
 ## Build & run
@@ -75,7 +80,7 @@ flag-fall-vs-bare-king draw per FIDE 6.9). Both exit non-zero on failure.
 engine/   Board, Move, MoveGenerator, Zobrist, Evaluator, Search, TranspositionTable,
           OpeningBook, Perft
           Pure rules + search. Zero dependencies on game/ or ui/. No Swing.
-game/     GameSession, ChessClock, GameConfig, GameResult, Notation (SAN / PGN)
+game/     GameSession, ChessClock, GameConfig, GameResult, Notation (SAN / PGN), SavedGame
           Everything above single-position level: history, repetition table,
           draw adjudication, clocks, timeout verdicts. No Swing widgets.
 ui/       MainFrame, StartScreen, GamePanel, BoardPanel, PieceRenderer, Sounds

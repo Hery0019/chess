@@ -2,6 +2,7 @@ package ui;
 
 import engine.Pieces;
 import game.GameConfig;
+import game.SavedGame;
 
 import javax.swing.BorderFactory;
 import javax.swing.Box;
@@ -11,10 +12,13 @@ import javax.swing.Icon;
 import javax.swing.ImageIcon;
 import javax.swing.JButton;
 import javax.swing.JComponent;
+import javax.swing.JFileChooser;
 import javax.swing.JLabel;
+import javax.swing.JOptionPane;
 import javax.swing.JPanel;
 import javax.swing.JRootPane;
 import javax.swing.JToggleButton;
+import javax.swing.filechooser.FileNameExtensionFilter;
 import java.awt.AlphaComposite;
 import java.awt.Color;
 import java.awt.Component;
@@ -36,6 +40,10 @@ import java.awt.event.HierarchyEvent;
 import java.awt.font.TextAttribute;
 import java.awt.geom.RoundRectangle2D;
 import java.awt.image.BufferedImage;
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -89,7 +97,11 @@ public final class StartScreen extends JPanel {
             "Depth 6 — expert, a few seconds per move",
     };
 
-    public StartScreen(Consumer<GameConfig> onStart) {
+    /**
+     * @param onStart  receives the configuration when Start is pressed
+     * @param onResume receives a parsed save file chosen via "Resume a saved game…"
+     */
+    public StartScreen(Consumer<GameConfig> onStart, Consumer<SavedGame> onResume) {
         super(new GridBagLayout());
         setOpaque(true);
 
@@ -158,7 +170,18 @@ public final class StartScreen extends JPanel {
         c.insets = new Insets(26, 0, 0, 0);
         card.add(start, c);
 
-        c.insets = new Insets(14, 0, 0, 0);
+        c.insets = new Insets(8, 0, 0, 0);
+        JButton resume = new JButton("Resume a saved game…");
+        resume.setContentAreaFilled(false);
+        resume.setBorderPainted(false);
+        resume.setFocusPainted(false);
+        resume.setForeground(MUTED);
+        resume.setFont(font(Font.PLAIN, 12f));
+        resume.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+        resume.addActionListener(e -> chooseSavedGame(onResume));
+        card.add(resume, c);
+
+        c.insets = new Insets(10, 0, 0, 0);
         JLabel hint = label("Drag & drop or click-click  ·  premove while the AI thinks  ·  Enter starts",
                 font(Font.PLAIN, 11f), MUTED);
         hint.setHorizontalAlignment(JLabel.CENTER);
@@ -173,6 +196,20 @@ public final class StartScreen extends JPanel {
             JRootPane root = getRootPane();
             if (root != null) root.setDefaultButton(isShowing() ? start : null);
         });
+    }
+
+    private void chooseSavedGame(Consumer<SavedGame> onResume) {
+        JFileChooser chooser = new JFileChooser();
+        chooser.setDialogTitle("Resume a saved game");
+        chooser.setFileFilter(new FileNameExtensionFilter("Chess save (*.chess)", "chess"));
+        if (chooser.showOpenDialog(this) != JFileChooser.APPROVE_OPTION) return;
+        Path file = chooser.getSelectedFile().toPath();
+        try {
+            onResume.accept(SavedGame.parse(Files.readString(file, StandardCharsets.UTF_8)));
+        } catch (IOException | IllegalArgumentException ex) {
+            JOptionPane.showMessageDialog(this, "Cannot read " + file.getFileName() + ":\n" + ex.getMessage(),
+                    "Resume a saved game", JOptionPane.ERROR_MESSAGE);
+        }
     }
 
     // ---- pieces of the card ----

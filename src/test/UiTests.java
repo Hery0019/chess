@@ -290,7 +290,7 @@ public final class UiTests {
 
     private static void startScreenEmitsConfig() {
         List<GameConfig> emitted = new ArrayList<>();
-        StartScreen s = new StartScreen(emitted::add);
+        StartScreen s = new StartScreen(emitted::add, saved -> {});
         s.setSize(640, 760);
         layoutTree(s);
         s.paint(new BufferedImage(640, 760, BufferedImage.TYPE_INT_RGB).getGraphics());
