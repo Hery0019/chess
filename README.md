@@ -33,8 +33,13 @@ quiescence search. Java 21, zero external dependencies.
 - **Save… / Resume a saved game…** write and reload a small text file
   (`.chess`: settings, clocks, moves in long algebraic notation, replayed
   and validated on load).
+- **Resign** and **Offer draw** (Human vs AI): the AI accepts a draw when
+  its last search rated its own position no better than about +0.30 and
+  the game has left the opening; otherwise the offer is declined.
 - **Game over** dialog offers a rematch (colours swapped), a new game, or
   staying on the final position to review it.
+- Window placement, the sound switch and the last start-screen settings
+  are remembered between runs (`java.util.prefs`).
 - **Flip Board** rotates the view; **New Game** returns to the start screen.
 
 ## Build & run
@@ -83,7 +88,7 @@ engine/   Board, Move, MoveGenerator, Zobrist, Evaluator, Search, TranspositionT
 game/     GameSession, ChessClock, GameConfig, GameResult, Notation (SAN / PGN), SavedGame
           Everything above single-position level: history, repetition table,
           draw adjudication, clocks, timeout verdicts. No Swing widgets.
-ui/       MainFrame, StartScreen, GamePanel, BoardPanel, PieceRenderer, Sounds
+ui/       MainFrame, StartScreen, GamePanel, BoardPanel, PieceRenderer, Sounds, Prefs
           Swing only. Never mutates engine state directly — all moves flow
           through GameSession.
 app/      Main (EDT bootstrap)

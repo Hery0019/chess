@@ -290,7 +290,7 @@ public final class UiTests {
 
     private static void startScreenEmitsConfig() {
         List<GameConfig> emitted = new ArrayList<>();
-        StartScreen s = new StartScreen(emitted::add, saved -> {});
+        StartScreen s = new StartScreen(null, emitted::add, saved -> {});
         s.setSize(640, 760);
         layoutTree(s);
         s.paint(new BufferedImage(640, 760, BufferedImage.TYPE_INT_RGB).getGraphics());
@@ -325,6 +325,17 @@ public final class UiTests {
         check("start: emits the chosen config",
                 cfg.mode() == GameConfig.Mode.HUMAN_VS_AI && cfg.humanColor() == Pieces.BLACK
                 && cfg.minutesPerSide() == 5 && cfg.aiDepth() == 2);
+
+        // Remembered settings are preselected and come back unchanged.
+        GameConfig remembered = new GameConfig(GameConfig.Mode.AI_VS_AI, Pieces.BLACK, 15, 6);
+        List<GameConfig> again = new ArrayList<>();
+        StartScreen s2 = new StartScreen(remembered, again::add, saved -> {});
+        s2.setSize(640, 760);
+        layoutTree(s2);
+        AbstractButton black2 = findButton(s2, "Black");
+        findButton(s2, "Start Game").doClick();
+        check("start: remembered settings preselected",
+                again.size() == 1 && again.get(0).equals(remembered) && black2 != null && !black2.isEnabled());
     }
 
     // ---- helpers ----
