@@ -152,23 +152,49 @@ public final class UiTests {
         click(p, sq("d4"));
         check("premove: enemy piece cannot be premoved", !p.hasPremove());
 
-        // A new premove replaces the old one; own-piece squares are not targets.
+        // Queue: a later premove starts from where the earlier one leaves the piece.
         click(p, sq("c4"));
         click(p, sq("b3"));
-        click(p, sq("c4"));
+        click(p, sq("b3"));   // the bishop is already "on" b3
         click(p, sq("d5"));
-        check("premove: replaced by a newer one", "c4d5".equals(p.premoveText()));
+        check("premove: queue of two", "c4b3 b3d5".equals(p.premoveText()));
         click(p, sq("a1"));
-        click(p, sq("a2"));
-        check("premove: own-piece square is not a target", !p.hasPremove());
-
-        // Double push premove resolves when the turn arrives.
+        click(p, sq("a2"));   // own pawn: re-selects a2, queue untouched
+        check("premove: own-piece square is not a target", p.premoveCount() == 2);
         click(p, sq("h2"));
         click(p, sq("h4"));
+        check("premove: three queued", "c4b3 b3d5 h2h4".equals(p.premoveText()));
+
+        // The queue plays out one move per turn.
         session.applyMove(find(session, "d7d6"));
         p.setInteractionEnabled(true);
-        Move pre2 = p.consumePremove();
-        check("premove: double push resolves", pre2 != null && pre2.toString().equals("h2h4"));
+        Move q1 = p.consumePremove();
+        check("premove: first of the queue resolves",
+                q1 != null && q1.toString().equals("c4b3") && "b3d5 h2h4".equals(p.premoveText()));
+        session.applyMove(q1);
+        p.setInteractionEnabled(false);
+        session.applyMove(find(session, "a7a6"));
+        p.setInteractionEnabled(true);
+        Move q2 = p.consumePremove();
+        check("premove: second resolves from its new square", q2 != null && q2.toString().equals("b3d5"));
+        session.applyMove(q2);
+        p.setInteractionEnabled(false);
+        session.applyMove(find(session, "h7h6"));
+        p.setInteractionEnabled(true);
+        Move q3 = p.consumePremove();
+        check("premove: double push resolves, queue empty", q3 != null && q3.toString().equals("h2h4") && !p.hasPremove());
+        session.applyMove(q3);
+        p.setInteractionEnabled(false);
+
+        // An illegal first premove drops the whole queue.
+        click(p, sq("d1"));
+        click(p, sq("e2"));
+        click(p, sq("e2"));
+        click(p, sq("e3"));
+        check("premove: queue pending", p.premoveCount() == 2);
+        session.applyMove(find(session, "c5f2"));   // Bxf2+ — Qe2 no longer legal
+        p.setInteractionEnabled(true);
+        check("premove: illegal first premove drops the queue", p.consumePremove() == null && !p.hasPremove());
 
         // AI-vs-AI panel (no human colour) never premoves.
         GameSession s2 = new GameSession();
