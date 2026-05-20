@@ -63,8 +63,8 @@ java -cp out app.Main
 ```bash
 ./test.sh           # or .\test.ps1 — runs the three runners below, headless
 java -cp out test.PerftTest      # engine acceptance gate: 11 standard perft positions
-java -cp out test.EngineTests    # 41 targeted rule / draw / search / zobrist tests
-java -cp out test.UiTests        # Swing views driven by synthetic mouse events
+java -cp out test.EngineTests    # 77 targeted rule / draw / search / notation / session tests
+java -cp out test.UiTests        # 50 checks: Swing views driven by synthetic mouse events
 ```
 
 `UiTests` needs no display: it dispatches `MouseEvent`s straight into
