@@ -14,7 +14,8 @@ import engine.Pieces;
  */
 public record GameConfig(Mode mode, int humanColor, int minutesPerSide, int aiDepth) {
 
-    public enum Mode { HUMAN_VS_AI, AI_VS_AI }
+    /** ONLINE: the local human plays {@code humanColor}, the other side is a remote player. */
+    public enum Mode { HUMAN_VS_AI, AI_VS_AI, ONLINE }
 
     /** {@code minutesPerSide} value meaning "no time control". */
     public static final int NO_CLOCK = 0;
@@ -29,11 +30,17 @@ public record GameConfig(Mode mode, int humanColor, int minutesPerSide, int aiDe
 
     /** Is the given engine color controlled by the AI under this config? */
     public boolean isAi(int color) {
-        return mode == Mode.AI_VS_AI || color != humanColor;
+        return mode == Mode.AI_VS_AI || (mode == Mode.HUMAN_VS_AI && color != humanColor);
     }
 
+    /** Is the given color played by the human at this machine? */
     public boolean isHuman(int color) {
-        return mode == Mode.HUMAN_VS_AI && color == humanColor;
+        return mode != Mode.AI_VS_AI && color == humanColor;
+    }
+
+    /** Is the given color played by someone over the network? */
+    public boolean isRemote(int color) {
+        return mode == Mode.ONLINE && color != humanColor;
     }
 
     /** Clock allotment in ms; 0 when {@link #hasClock()} is false. */
