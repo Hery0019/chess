@@ -10,6 +10,9 @@ import game.GameConfig;
 import game.GameSession;
 import game.Notation;
 import game.SavedGame;
+import net.ChessClient;
+import net.Protocol;
+import net.Protocol.Message;
 
 import javax.swing.AbstractAction;
 import javax.swing.BorderFactory;
@@ -47,8 +50,9 @@ import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * One live game: board view, two clocks, status line, move list, controls,
- * and the AI worker lifecycle. All game-state mutation happens on the EDT;
- * the worker thread only ever reads a private {@link Board#copy()}.
+ * and either the AI worker lifecycle or the online opponent. All game-state
+ * mutation happens on the EDT; the worker thread only ever reads a private
+ * {@link Board#copy()}, and network messages arrive on the EDT too.
  *
  * CONCURRENCY DESIGN (reviewed, points 8-9):
  *  - The 100 ms Swing timer is a *sampler*: it repaints clock labels and
@@ -64,14 +68,21 @@ import java.util.concurrent.atomic.AtomicBoolean;
  *    interrupt or kill the thread; a cancelled worker returns null quickly
  *    and its result is discarded. The shared Search is synchronized, so a
  *    late worker simply finishes before the next one starts.
+ *
+ * ONLINE games: our moves are applied locally and sent; the opponent's
+ * arrive as MOVE messages already validated by the server and are applied
+ * through the same session (which re-validates). Each side runs its own
+ * clock; a player reports their <em>own</em> flag fall (TIMEOUT), which
+ * avoids disputes between two honest clients. The client connection is
+ * owned by {@link MainFrame}, which routes messages here.
  */
 public final class GamePanel extends JPanel {
 
     /** What the panel needs from the application shell. */
     public interface Host {
-        /** Back to the start screen. */
+        /** Back to the start screen (closes any online session). */
         void newGame();
-        /** Start a fresh game with this configuration (rematch). */
+        /** Start a fresh local game with this configuration (rematch). */
         void startGame(GameConfig config);
     }
 
@@ -108,20 +119,38 @@ public final class GamePanel extends JPanel {
     private final JTable moveTable = new JTable(moveModel);
     private final Timer uiTimer;
 
+    // ---- online ----
+    private final ChessClient online;          // null for local games
+    private final String[] names = new String[2];
+    private boolean onlineGone;                // opponent left or connection dropped
+    private boolean rematchRequested;
+    private boolean opponentWantsRematch;
+
     private int topColor;            // color shown at the top of the window
     private AiWorker activeWorker;
     private boolean paused = false;
     private boolean disposed = false;
     private boolean endDialogShown = false;
 
+    /** Local game (fresh or resumed). */
+    public GamePanel(GameConfig config, SavedGame saved, Host host) {
+        this(config, saved, host, null, null, null);
+    }
+
     /**
-     * @param saved a game to resume, or null for a fresh one
+     * @param saved     a game to resume, or null for a fresh one
+     * @param online    the connection for an ONLINE game, else null
+     * @param whiteName player names for an online game (shown and used in PGN)
      * @throws IllegalArgumentException if the saved moves are not a legal sequence
      */
-    public GamePanel(GameConfig config, SavedGame saved, Host host) {
+    public GamePanel(GameConfig config, SavedGame saved, Host host, ChessClient online,
+                     String whiteName, String blackName) {
         super(new BorderLayout(8, 8));
         this.config = config;
         this.host = host;
+        this.online = online;
+        this.names[Pieces.WHITE] = whiteName;
+        this.names[Pieces.BLACK] = blackName;
         this.session = new GameSession();
         // Untimed games keep a clock object so the tick/pause/label flow is
         // unchanged; it simply never expires and displays elapsed time.
@@ -136,11 +165,10 @@ public final class GamePanel extends JPanel {
             clock.restoreUsed(saved.whiteUsedMillis(), saved.blackUsedMillis());
         }
 
-        boolean flipped = config.mode() == GameConfig.Mode.HUMAN_VS_AI
-                && config.humanColor() == Pieces.BLACK;
+        boolean flipped = config.isHuman(Pieces.BLACK);
         this.topColor = flipped ? Pieces.WHITE : Pieces.BLACK;
-        // Premoves are only meaningful when a human is waiting on the AI.
-        int humanColor = config.mode() == GameConfig.Mode.HUMAN_VS_AI ? config.humanColor() : -1;
+        // Premoves are only meaningful when a human is waiting on the other side.
+        int humanColor = config.mode() == GameConfig.Mode.AI_VS_AI ? -1 : config.humanColor();
         this.boardPanel = new BoardPanel(session, flipped, humanColor, this::onHumanMove);
 
         Font clockFont = new Font(Font.MONOSPACED, Font.BOLD, 22);
@@ -175,6 +203,10 @@ public final class GamePanel extends JPanel {
         uiTimer = new Timer(TIMER_PERIOD_MS, e -> onTick());
     }
 
+    private boolean isOnline() { return config.mode() == GameConfig.Mode.ONLINE; }
+
+    private int opponentColor() { return config.humanColor() ^ 1; }
+
     /** Move list plus the game controls, to the right of the board. */
     private JComponent buildSidePanel() {
         JPanel side = new JPanel(new BorderLayout(0, 8));
@@ -205,9 +237,10 @@ public final class GamePanel extends JPanel {
         JScrollPane scroll = new JScrollPane(moveTable);
 
         boolean aiVsAi = config.mode() == GameConfig.Mode.AI_VS_AI;
+        boolean humanVsAi = config.mode() == GameConfig.Mode.HUMAN_VS_AI;
         pauseButton.setVisible(aiVsAi);
         pauseButton.addActionListener(e -> togglePause());
-        undoButton.setVisible(!aiVsAi);
+        undoButton.setVisible(humanVsAi);
         undoButton.setToolTipText("Take back your last move (Ctrl+Z)");
         undoButton.addActionListener(e -> undo());
         JButton flipBoard = new JButton("Flip Board");
@@ -215,30 +248,38 @@ public final class GamePanel extends JPanel {
         resignButton.setVisible(!aiVsAi);
         resignButton.addActionListener(e -> resign());
         drawButton.setVisible(!aiVsAi);
-        drawButton.setToolTipText("The AI accepts when its own evaluation is not better than equal");
+        drawButton.setToolTipText(isOnline() ? "Offer your opponent a draw"
+                : "The AI accepts when its own evaluation is not better than equal");
         drawButton.addActionListener(e -> offerDraw());
         JButton exportPgn = new JButton("Export PGN…");
         exportPgn.addActionListener(e -> exportPgn());
         JButton save = new JButton("Save…");
         save.setToolTipText("Save this game to resume it later");
         save.addActionListener(e -> saveGame());
-        JButton newGame = new JButton("New Game");
+        save.setVisible(!isOnline());
+        JButton newGame = new JButton(isOnline() ? "Leave" : "New Game");
         newGame.addActionListener(e -> host.newGame());
 
         JPanel buttons = new JPanel(new GridLayout(0, 2, 6, 6));
-        buttons.add(aiVsAi ? pauseButton : undoButton);
+        if (aiVsAi) buttons.add(pauseButton);
+        if (humanVsAi) buttons.add(undoButton);
         buttons.add(flipBoard);
         if (!aiVsAi) {
             buttons.add(resignButton);
             buttons.add(drawButton);
         }
-        buttons.add(save);
+        if (!isOnline()) buttons.add(save);
         buttons.add(exportPgn);
         buttons.add(newGame);
 
-        // Ctrl+Z anywhere in the window takes back a move.
-        getInputMap(WHEN_IN_FOCUSED_WINDOW).put(
-                KeyStroke.getKeyStroke(KeyEvent.VK_Z, Toolkit.getDefaultToolkit().getMenuShortcutKeyMaskEx()), "undo");
+        // Ctrl+Z (Cmd+Z on macOS) anywhere in the window takes back a move.
+        int shortcutMask;
+        try {
+            shortcutMask = Toolkit.getDefaultToolkit().getMenuShortcutKeyMaskEx();
+        } catch (java.awt.HeadlessException e) {
+            shortcutMask = java.awt.event.InputEvent.CTRL_DOWN_MASK;   // headless tests
+        }
+        getInputMap(WHEN_IN_FOCUSED_WINDOW).put(KeyStroke.getKeyStroke(KeyEvent.VK_Z, shortcutMask), "undo");
         getActionMap().put("undo", new AbstractAction() {
             @Override public void actionPerformed(ActionEvent e) { if (undoButton.isVisible()) undo(); }
         });
@@ -251,11 +292,13 @@ public final class GamePanel extends JPanel {
 
     private String playerName(int color) {
         String base = GameConfig.colorName(color);
+        if (isOnline()) return names[color] + " (" + base + (color == config.humanColor() ? ", you)" : ")");
         return config.isAi(color) ? base + " (AI, depth " + config.aiDepth() + ")" : base;
     }
 
     /** Name for the PGN tags: who actually played the side. */
     private String pgnName(int color) {
+        if (isOnline()) return names[color];
         return config.isAi(color) ? "AI (depth " + config.aiDepth() + ")" : "Human";
     }
 
@@ -297,14 +340,12 @@ public final class GamePanel extends JPanel {
     }
 
     private void resign() {
-        if (session.result().isOver() || config.mode() != GameConfig.Mode.HUMAN_VS_AI) return;
+        if (session.result().isOver() || config.mode() == GameConfig.Mode.AI_VS_AI) return;
         int answer = JOptionPane.showConfirmDialog(this, "Resign this game?", "Resign",
                 JOptionPane.YES_NO_OPTION, JOptionPane.QUESTION_MESSAGE);
         if (answer != JOptionPane.YES_OPTION || session.result().isOver()) return;
-        if (activeWorker != null) {
-            activeWorker.cancelFlag.set(true);
-            activeWorker = null;
-        }
+        cancelWorker();
+        if (online != null) online.resign();
         session.resign(config.humanColor());
         Sounds.play(Sounds.Kind.GAME_END);
         endGame();
@@ -312,12 +353,21 @@ public final class GamePanel extends JPanel {
     }
 
     /**
-     * The AI accepts a draw when its last search did not rate its own
-     * position as better than roughly equal (+0.30) and the game has left
-     * the opening; otherwise the offer is declined in the status line.
+     * Against the AI: accepted when its last search did not rate its own
+     * position as better than roughly equal (+0.30) and the game has left the
+     * opening; otherwise declined in the status line. Online: the offer is
+     * sent and the opponent decides.
      */
     private void offerDraw() {
-        if (session.result().isOver() || !config.isHuman(session.sideToMove()) || activeWorker != null) return;
+        if (session.result().isOver()) return;
+        if (online != null) {
+            if (onlineGone) return;
+            online.offerDraw();
+            notice("Draw offered — waiting for " + names[opponentColor()], 6000);
+            refresh();
+            return;
+        }
+        if (!config.isHuman(session.sideToMove()) || activeWorker != null) return;
         boolean accepts = lastAiScore != null && lastAiScore <= 30 && session.plyCount() >= 20;
         if (accepts) {
             session.agreeDraw();
@@ -336,12 +386,29 @@ public final class GamePanel extends JPanel {
 
     /** Shown once per game end (after the last slide): rematch, new game, or stay and review. */
     private void showEndDialog() {
-        if (disposed || !session.result().isOver()) return;
-        String[] options = {"Rematch", "New Game", "Review"};
+        if (disposed || !session.result().isOver() || !canShowDialogs()) return;
+        boolean canRematch = !isOnline() || !onlineGone;
+        String[] options = canRematch ? new String[]{"Rematch", isOnline() ? "Leave" : "New Game", "Review"}
+                                      : new String[]{"Leave", "Review"};
         int choice = JOptionPane.showOptionDialog(this, session.result().message(), "Game over",
                 JOptionPane.DEFAULT_OPTION, JOptionPane.INFORMATION_MESSAGE, null, options, options[0]);
-        if (choice == 0) host.startGame(rematchConfig());
-        else if (choice == 1) host.newGame();
+        String picked = choice < 0 ? "Review" : options[choice];
+        switch (picked) {
+            case "Rematch" -> {
+                if (isOnline()) requestRematch();
+                else host.startGame(rematchConfig());
+            }
+            case "New Game", "Leave" -> host.newGame();
+            default -> { }
+        }
+    }
+
+    private void requestRematch() {
+        if (online == null || onlineGone || rematchRequested) return;
+        rematchRequested = true;
+        online.requestRematch();
+        notice(opponentWantsRematch ? "Starting the rematch…" : "Rematch requested — waiting for " + names[opponentColor()], 10_000);
+        refresh();
     }
 
     /** Same settings, colours swapped (Human vs AI). */
@@ -359,11 +426,15 @@ public final class GamePanel extends JPanel {
         else maybeStartAi();
     }
 
-    /** Stops timers and abandons any in-flight search. Idempotent. */
+    /** Stops timers and abandons any in-flight search. Idempotent. The online connection stays with MainFrame. */
     public void dispose() {
         disposed = true;
         uiTimer.stop();
         boardPanel.stopAnimation();
+        cancelWorker();
+    }
+
+    private void cancelWorker() {
         if (activeWorker != null) {
             activeWorker.cancelFlag.set(true);
             activeWorker = null;
@@ -374,7 +445,13 @@ public final class GamePanel extends JPanel {
 
     private void onHumanMove(Move m) {
         if (session.result().isOver() || !config.isHuman(session.sideToMove())) return;
+        playLocalMove(m);
+    }
+
+    /** Applies one of our own moves (clicked, dropped or premoved) and sends it online if needed. */
+    private void playLocalMove(Move m) {
         session.applyMove(m);
+        if (online != null) online.sendMove(m);
         afterMoveApplied();
     }
 
@@ -436,10 +513,7 @@ public final class GamePanel extends JPanel {
     private void undo() {
         int plies = undoPlies();
         if (plies == 0) return;
-        if (activeWorker != null) {
-            activeWorker.cancelFlag.set(true);
-            activeWorker = null;
-        }
+        cancelWorker();
         boolean wasOver = session.result().isOver();
         for (int i = 0; i < plies; i++) session.undoLastMove();
         boardPanel.stopAnimation();
@@ -455,13 +529,18 @@ public final class GamePanel extends JPanel {
         refresh();
     }
 
+    /**
+     * Reacts to the side to move: enables the board for the local human
+     * (and schedules a queued premove), waits for the network opponent, or
+     * starts the AI worker.
+     */
     private void maybeStartAi() {
         if (session.result().isOver() || paused) return;
         int stm = session.sideToMove();
-        if (!config.isAi(stm)) {
+        if (config.isHuman(stm)) {
             boardPanel.setInteractionEnabled(true);
-            // A premove entered while the AI was thinking is played once the
-            // AI's move has finished sliding, so both moves are visible.
+            // A premove entered while waiting is played once the opponent's
+            // move has finished sliding, so both moves are visible.
             if (boardPanel.hasPremove()) {
                 int delay = boardPanel.isAnimating() ? BoardPanel.ANIMATION_MS + 40 : 1;
                 Timer t = new Timer(delay, e -> playPremove());
@@ -471,6 +550,7 @@ public final class GamePanel extends JPanel {
             return;
         }
         boardPanel.setInteractionEnabled(false);
+        if (config.isRemote(stm)) return;   // the opponent's move will arrive over the network
         if (activeWorker != null) return;   // one at a time; defensive
         long minMillis = config.mode() == GameConfig.Mode.AI_VS_AI ? AI_VS_AI_MIN_MOVE_MS : 0;
         activeWorker = new AiWorker(session.board().copy(), session.priorPositionKeys(),
@@ -482,17 +562,15 @@ public final class GamePanel extends JPanel {
     /**
      * Plays the held premove if it is legal in the current position (the
      * user may have moved or cancelled in the meantime — then nothing
-     * happens). Goes through the same path as a clicked move, so the AI
-     * reply is kicked off by afterMoveApplied().
+     * happens). Goes through the same path as a clicked move.
      */
     private void playPremove() {
         if (disposed || session.result().isOver() || paused) return;
         if (!config.isHuman(session.sideToMove()) || activeWorker != null) return;
         Move premove = boardPanel.consumePremove();
         if (premove == null) return;
-        session.applyMove(premove);
         boardPanel.animate(premove);
-        afterMoveApplied();
+        playLocalMove(premove);
     }
 
     private long timeBudgetMillis(int color) {
@@ -527,10 +605,7 @@ public final class GamePanel extends JPanel {
             // Abandon the in-flight search rather than freezing mid-think:
             // the position is cheap to re-search on resume, and "paused"
             // must mean the clock is genuinely stopped.
-            if (activeWorker != null) {
-                activeWorker.cancelFlag.set(true);
-                activeWorker = null;
-            }
+            cancelWorker();
             clock.stop();
         } else {
             clock.startTurn(session.sideToMove());
@@ -539,17 +614,124 @@ public final class GamePanel extends JPanel {
         refresh();
     }
 
+    // ---- online messages (routed here by MainFrame, on the EDT) ----
+
+    /** Everything except START, which MainFrame turns into a new panel. */
+    public void onOnlineMessage(Message m) {
+        if (online == null || disposed) return;
+        int opp = opponentColor();
+        boolean over = session.result().isOver();
+        switch (m.type()) {
+            case Protocol.MOVE -> {
+                if (over || !config.isRemote(session.sideToMove())) return;
+                Move move = null;
+                for (Move legal : session.legalMoves()) if (legal.toString().equals(m.arg(0))) { move = legal; break; }
+                if (move == null) {
+                    desync("The server sent a move that is not legal here: " + m.arg(0));
+                    return;
+                }
+                session.applyMove(move);
+                boardPanel.animate(move);
+                afterMoveApplied();
+            }
+            case Protocol.RESIGN -> {
+                if (!over) { session.resign(opp); Sounds.play(Sounds.Kind.GAME_END); endGame(); }
+                refresh();
+            }
+            case Protocol.DRAW_OFFER -> {
+                if (over) return;
+                if (!canShowDialogs()) { online.declineDraw(); return; }
+                int answer = JOptionPane.showConfirmDialog(this, names[opp] + " offers a draw. Accept?",
+                        "Draw offer", JOptionPane.YES_NO_OPTION, JOptionPane.QUESTION_MESSAGE);
+                if (session.result().isOver()) return;   // ended while the dialog was open
+                if (answer == JOptionPane.YES_OPTION) {
+                    online.acceptDraw();
+                    session.agreeDraw();
+                    Sounds.play(Sounds.Kind.GAME_END);
+                    endGame();
+                } else {
+                    online.declineDraw();
+                }
+                refresh();
+            }
+            case Protocol.DRAW_ACCEPT -> {
+                if (!over) { session.agreeDraw(); Sounds.play(Sounds.Kind.GAME_END); endGame(); }
+                refresh();
+            }
+            case Protocol.DRAW_DECLINE -> { notice(names[opp] + " declined the draw", 4000); refresh(); }
+            case Protocol.TIMEOUT -> {
+                if (!over) { session.timeout(opp); Sounds.play(Sounds.Kind.GAME_END); endGame(); }
+                refresh();
+            }
+            case Protocol.REMATCH -> {
+                opponentWantsRematch = true;
+                if (rematchRequested) { notice("Starting the rematch…", 5000); refresh(); return; }
+                if (!canShowDialogs()) { notice(names[opp] + " wants a rematch", 8000); refresh(); return; }
+                int answer = JOptionPane.showConfirmDialog(this, names[opp] + " wants a rematch. Accept?",
+                        "Rematch", JOptionPane.YES_NO_OPTION, JOptionPane.QUESTION_MESSAGE);
+                if (answer == JOptionPane.YES_OPTION) requestRematch();
+                else notice("Rematch declined — " + names[opp] + " is still waiting", 6000);
+                refresh();
+            }
+            case Protocol.OPPONENT_LEFT -> {
+                onlineGone = true;
+                if (!over) { session.abandon(opp); Sounds.play(Sounds.Kind.GAME_END); endGame(); }
+                else notice(names[opp] + " left the game", 8000);
+                refresh();
+            }
+            case Protocol.ERROR -> {
+                String text = String.join(" ", m.args());
+                if (text.contains("illegal") || text.contains("turn")) desync("Server refused our move: " + text);
+                else { notice("Server: " + text, 6000); refresh(); }
+            }
+            default -> { }
+        }
+    }
+
+    public void onOnlineDisconnected(String reason) {
+        if (disposed) return;
+        onlineGone = true;
+        if (!session.result().isOver()) {
+            session.abort();
+            endGame();
+        }
+        notice("Disconnected: " + reason, 15_000);
+        refresh();
+        if (canShowDialogs()) {
+            JOptionPane.showMessageDialog(this, "Connection lost: " + reason, "Online game", JOptionPane.WARNING_MESSAGE);
+        }
+    }
+
+    /** The two ends disagree about the game: stop rather than continue on a wrong position. */
+    private void desync(String detail) {
+        System.err.println("online desync: " + detail + " (moves so far: " + String.join(" ", session.sanHistory()) + ")");
+        onlineGone = true;
+        if (!session.result().isOver()) {
+            session.abort();
+            endGame();
+        }
+        notice(detail, 15_000);
+        refresh();
+        if (canShowDialogs()) {
+            JOptionPane.showMessageDialog(this, detail + "\nThe game has been aborted.", "Online game",
+                    JOptionPane.ERROR_MESSAGE);
+        }
+    }
+
+    /** Dialogs are skipped in headless runs (tests); the status line carries the message instead. */
+    private static boolean canShowDialogs() { return !java.awt.GraphicsEnvironment.isHeadless(); }
+
     // ---- clock tick ----
 
     private void onTick() {
         if (!session.result().isOver() && !paused) {
             int running = clock.runningSide();
-            if (running != -1 && clock.isExpired(running)) {
-                if (activeWorker != null) {
-                    activeWorker.cancelFlag.set(true);
-                    activeWorker = null;
-                }
+            if (running != -1 && clock.isExpired(running) && !config.isRemote(running)) {
+                // Our own (or the local AI's) flag fell. A remote opponent
+                // reports their own flag; we never adjudicate it for them.
+                cancelWorker();
                 session.timeout(running);
+                if (online != null) online.reportTimeout();
                 Sounds.play(Sounds.Kind.GAME_END);
                 endGame();
             }
@@ -568,6 +750,9 @@ public final class GamePanel extends JPanel {
         } else if (activeWorker != null) {
             status = "AI is thinking…";
             if (boardPanel.hasPremove()) status += "   (premove: " + boardPanel.premoveText() + ")";
+        } else if (isOnline() && config.isRemote(session.sideToMove())) {
+            status = "Waiting for " + names[opponentColor()] + "…";
+            if (boardPanel.hasPremove()) status += "   (premove: " + boardPanel.premoveText() + ")";
         } else {
             status = session.statusText();
             if (lastAiInfo != null) status += "   ·   AI " + lastAiInfo;
@@ -578,9 +763,10 @@ public final class GamePanel extends JPanel {
         }
         statusLabel.setText("   " + status);
         undoButton.setEnabled(undoPlies() > 0);
-        boolean humanTurn = !session.result().isOver() && config.isHuman(session.sideToMove()) && activeWorker == null;
-        resignButton.setEnabled(!session.result().isOver());
-        drawButton.setEnabled(humanTurn);
+        boolean over = session.result().isOver();
+        boolean humanTurn = !over && config.isHuman(session.sideToMove()) && activeWorker == null;
+        resignButton.setEnabled(!over && !onlineGone);
+        drawButton.setEnabled(isOnline() ? !over && !onlineGone : humanTurn);
         syncMoveList();
         boardPanel.repaint();
     }

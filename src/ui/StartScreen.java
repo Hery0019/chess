@@ -17,9 +17,11 @@ import javax.swing.JLabel;
 import javax.swing.JOptionPane;
 import javax.swing.JPanel;
 import javax.swing.JRootPane;
+import javax.swing.JTextField;
 import javax.swing.JToggleButton;
 import javax.swing.filechooser.FileNameExtensionFilter;
 import java.awt.AlphaComposite;
+import java.awt.CardLayout;
 import java.awt.Color;
 import java.awt.Component;
 import java.awt.Cursor;
@@ -50,8 +52,10 @@ import java.util.Map;
 import java.util.function.Consumer;
 
 /**
- * Pre-game configuration screen. Emits an immutable {@link GameConfig} via
- * the callback; performs no game logic itself.
+ * Pre-game configuration screen. Emits an immutable {@link GameConfig}
+ * (local games), a {@link SavedGame} (resume) or an {@link OnlineRequest}
+ * (host / join a network game) via the callbacks; performs no game or
+ * network logic itself.
  *
  * Presentation: a warm dark background carrying a faint board texture and
  * ghosted piece silhouettes, with a single cream "card" holding the options
@@ -60,6 +64,9 @@ import java.util.function.Consumer;
  * the look does not depend on the platform look-and-feel; no assets.
  */
 public final class StartScreen extends JPanel {
+
+    /** "Host game" or "Join game" was pressed. {@code address} is {@code host:port} as typed. */
+    public record OnlineRequest(boolean host, String name, String address, int minutes) { }
 
     // ---- palette (shares the board's warm wood tones) ----
     private static final Color BG_TOP       = new Color(0x3B, 0x34, 0x2E);
@@ -81,6 +88,7 @@ public final class StartScreen extends JPanel {
     private static final int CONTENT_WIDTH = 400;
 
     private final PieceRenderer renderer = UnicodePieceRenderer.createBest();
+    private JButton defaultButton;
 
     /** Combo entry: minutes per side, {@link GameConfig#NO_CLOCK} for untimed. */
     private record TimeControl(int minutes) {
@@ -98,18 +106,22 @@ public final class StartScreen extends JPanel {
     };
 
     /**
-     * @param initial  settings to preselect (the last game's), or null for the defaults
-     * @param onStart  receives the configuration when Start is pressed
-     * @param onResume receives a parsed save file chosen via "Resume a saved game…"
+     * @param initial       settings to preselect (the last game's), or null for the defaults
+     * @param onlineName    name to prefill for online games
+     * @param onlineAddress {@code host:port} to prefill for online games
+     * @param onStart       receives the configuration when Start is pressed
+     * @param onResume      receives a parsed save file chosen via "Resume a saved game…"
+     * @param onOnline      receives the request when "Host game" / "Join game" is pressed
      */
-    public StartScreen(GameConfig initial, Consumer<GameConfig> onStart, Consumer<SavedGame> onResume) {
+    public StartScreen(GameConfig initial, String onlineName, String onlineAddress,
+                       Consumer<GameConfig> onStart, Consumer<SavedGame> onResume, Consumer<OnlineRequest> onOnline) {
         super(new GridBagLayout());
         setOpaque(true);
 
         // ---- controls ----
         Segmented<GameConfig.Mode> mode = new Segmented<>(
-                List.of(GameConfig.Mode.HUMAN_VS_AI, GameConfig.Mode.AI_VS_AI),
-                List.of("Human vs AI", "AI vs AI"), null, 0);
+                List.of(GameConfig.Mode.HUMAN_VS_AI, GameConfig.Mode.AI_VS_AI, GameConfig.Mode.ONLINE),
+                List.of("Human vs AI", "AI vs AI", "Online 1 v 1"), null, 0);
 
         Segmented<Integer> side = new Segmented<>(
                 List.of(Pieces.WHITE, Pieces.BLACK),
@@ -127,21 +139,54 @@ public final class StartScreen extends JPanel {
         JLabel strengthHint = label(STRENGTH_HINTS[depth.value()], font(Font.PLAIN, 12f), MUTED);
         depth.onChange(() -> strengthHint.setText(STRENGTH_HINTS[depth.value()]));
 
-        // Side choice is meaningless in AI-vs-AI: disabled, not hidden, so the
-        // layout stays stable and the causality is visible to the user.
-        mode.onChange(() -> side.setEnabled(mode.value() == GameConfig.Mode.HUMAN_VS_AI));
+        JTextField name = textField(onlineName == null ? "" : onlineName);
+        JTextField address = textField(onlineAddress == null ? "" : onlineAddress);
+        JPanel onlinePanel = onlinePanel(name, address);
+
+        PrimaryButton start = new PrimaryButton("Start Game");
+        start.addActionListener(e -> onStart.accept(new GameConfig(
+                mode.value(), side.value(), time.value().minutes(), depth.value())));
+        PrimaryButton hostGame = new PrimaryButton("Host game");
+        PrimaryButton joinGame = new PrimaryButton("Join game");
+        hostGame.addActionListener(e -> onOnline.accept(
+                new OnlineRequest(true, name.getText(), address.getText(), time.value().minutes())));
+        joinGame.addActionListener(e -> onOnline.accept(
+                new OnlineRequest(false, name.getText(), address.getText(), time.value().minutes())));
+
+        // The action row swaps between "Start" and "Host / Join" with the mode.
+        CardLayout actionCards = new CardLayout();
+        JPanel actions = new JPanel(actionCards);
+        actions.setOpaque(false);
+        actions.add(start, "local");
+        JPanel onlineActions = new JPanel(new GridLayout(1, 2, 10, 0));
+        onlineActions.setOpaque(false);
+        onlineActions.add(hostGame);
+        onlineActions.add(joinGame);
+        actions.add(onlineActions, "online");
+
+        // Side and strength are meaningless in AI-vs-AI / online: disabled, not
+        // hidden, so the layout stays stable and the causality is visible.
+        Runnable syncMode = () -> {
+            boolean online = mode.value() == GameConfig.Mode.ONLINE;
+            side.setEnabled(mode.value() == GameConfig.Mode.HUMAN_VS_AI);
+            depth.setEnabled(!online);
+            onlinePanel.setVisible(online);
+            actionCards.show(actions, online ? "online" : "local");
+            defaultButton = online ? joinGame : start;
+            JRootPane root = getRootPane();
+            if (root != null && isShowing()) root.setDefaultButton(defaultButton);
+            revalidate();
+            repaint();
+        };
+        mode.onChange(syncMode);
 
         if (initial != null) {
             mode.select(initial.mode());
             side.select(initial.humanColor());
             time.select(new TimeControl(initial.minutesPerSide()));
             depth.select(initial.aiDepth());
-            side.setEnabled(mode.value() == GameConfig.Mode.HUMAN_VS_AI);
         }
-
-        PrimaryButton start = new PrimaryButton("Start Game");
-        start.addActionListener(e -> onStart.accept(new GameConfig(
-                mode.value(), side.value(), time.value().minutes(), depth.value())));
+        syncMode.run();
 
         // ---- card layout ----
         Card card = new Card();
@@ -176,8 +221,11 @@ public final class StartScreen extends JPanel {
         c.insets = new Insets(6, 2, 0, 0);
         card.add(strengthHint, c);
 
+        c.insets = new Insets(14, 0, 0, 0);
+        card.add(onlinePanel, c);
+
         c.insets = new Insets(26, 0, 0, 0);
-        card.add(start, c);
+        card.add(actions, c);
 
         c.insets = new Insets(8, 0, 0, 0);
         JButton resume = new JButton("Resume a saved game…");
@@ -191,7 +239,7 @@ public final class StartScreen extends JPanel {
         card.add(resume, c);
 
         c.insets = new Insets(10, 0, 0, 0);
-        JLabel hint = label("Drag & drop or click-click  ·  premove while the AI thinks  ·  Enter starts",
+        JLabel hint = label("Drag & drop or click-click  ·  premove while waiting  ·  Enter starts",
                 font(Font.PLAIN, 11f), MUTED);
         hint.setHorizontalAlignment(JLabel.CENTER);
         card.add(hint, c);
@@ -203,8 +251,41 @@ public final class StartScreen extends JPanel {
         addHierarchyListener(e -> {
             if ((e.getChangeFlags() & HierarchyEvent.SHOWING_CHANGED) == 0) return;
             JRootPane root = getRootPane();
-            if (root != null) root.setDefaultButton(isShowing() ? start : null);
+            if (root != null) root.setDefaultButton(isShowing() ? defaultButton : null);
         });
+    }
+
+    // ---- online sub-panel ----
+
+    private JPanel onlinePanel(JTextField name, JTextField address) {
+        JPanel p = new JPanel(new GridBagLayout());
+        p.setOpaque(false);
+        GridBagConstraints c = new GridBagConstraints();
+        c.gridx = 0;
+        c.weightx = 1;
+        c.fill = GridBagConstraints.HORIZONTAL;
+        p.add(caption("Your name"), c);
+        c.insets = new Insets(6, 0, 0, 0);
+        p.add(name, c);
+        c.insets = new Insets(12, 0, 0, 0);
+        p.add(caption("Server address (host:port)"), c);
+        c.insets = new Insets(6, 0, 0, 0);
+        p.add(address, c);
+        c.insets = new Insets(6, 2, 0, 0);
+        p.add(label("<html><body style='width: " + (CONTENT_WIDTH - 20) + "px'>"
+                + "Host: opens that port on this PC and shows the address to share. "
+                + "Join: connects to a host or a standalone server.</body></html>", font(Font.PLAIN, 11f), MUTED), c);
+        return p;
+    }
+
+    private static JTextField textField(String text) {
+        JTextField f = new JTextField(text);
+        f.setFont(font(Font.PLAIN, 14f));
+        f.setForeground(TEXT);
+        f.setBackground(Color.WHITE);
+        f.setBorder(BorderFactory.createCompoundBorder(
+                BorderFactory.createLineBorder(CARD_EDGE), BorderFactory.createEmptyBorder(6, 8, 6, 8)));
+        return f;
     }
 
     private void chooseSavedGame(Consumer<SavedGame> onResume) {

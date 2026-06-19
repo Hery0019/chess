@@ -1,6 +1,7 @@
 # Chess — Java Swing, Minimax/Alpha-Beta AI
 
-A complete chess game: Human vs AI and AI vs AI, full FIDE move rules, optional
+A complete chess game: Human vs AI, AI vs AI and online 1 v 1 over Java
+sockets, full FIDE move rules, optional
 chess clocks (or an untimed game), and a negamax (minimax + alpha-beta) engine
 with iterative deepening, transposition table, quiescence search and a small
 opening book. Java 21, zero external dependencies.
@@ -44,6 +45,32 @@ opening book. Java 21, zero external dependencies.
   are remembered between runs (`java.util.prefs`).
 - **Flip Board** rotates the view; **New Game** returns to the start screen.
 
+## Online 1 v 1 (two PCs, Java sockets)
+
+Pick **Online 1 v 1** on the start screen, type a name and a `host:port`.
+
+- **Host game** opens that port on your PC (an embedded server), shows the
+  addresses to share, and waits. The other player picks **Join game** with
+  your `ip:port`. Only the port matters for the host; the time control is
+  the host's (first arrival's).
+- **Standalone server** — both players join the same machine, which can be
+  a third one: `java -cp chess.jar app.ServerMain 5000`. It pairs clients
+  two by two in arrival order, so several games can run at once.
+- The server is the referee: it keeps its own game per room and only relays
+  a move that is legal and from the side to move. Both clients still
+  adjudicate mate / stalemate / draws locally from the identical move list.
+- Each side runs its own clock; a player reports their **own** flag fall.
+  Resign, draw offers (the opponent decides), premoves and rematch (colours
+  swapped, both must accept) work online. A disconnect forfeits the game
+  for the player who dropped; losing your own connection aborts it.
+- Protocol: one text line per message (`HELLO`, `START`, `MOVE e2e4`,
+  `RESIGN`, `DRAW_OFFER/ACCEPT/DECLINE`, `TIMEOUT`, `REMATCH`,
+  `OPPONENT_LEFT`, `ERROR`, `PING/PONG`) — see `net/Protocol.java`.
+  Player names are reduced to single safe tokens.
+- Firewalls: the host must allow inbound TCP on the chosen port; across the
+  Internet the host's router needs a port forward. Names travel in clear —
+  there is no encryption or authentication (LAN / friends use).
+
 ## Build & run
 
 ```bash
@@ -65,7 +92,8 @@ java -cp out app.Main
 ./test.sh           # or .\test.ps1 — runs the three runners below, headless
 java -cp out test.PerftTest      # engine acceptance gate: 11 standard perft positions
 java -cp out test.EngineTests    # 77 targeted rule / draw / search / notation / session tests
-java -cp out test.UiTests        # 50 checks: Swing views driven by synthetic mouse events
+java -cp out test.UiTests        # 53 checks: Swing views driven by synthetic mouse events
+java -cp out test.NetTests       # server + two clients over loopback: pairing, relay, rematch, disconnects
 ```
 
 `UiTests` needs no display: it dispatches `MouseEvent`s straight into
@@ -90,11 +118,15 @@ engine/   Board, Move, MoveGenerator, Zobrist, Evaluator, Search, TranspositionT
 game/     GameSession, ChessClock, GameConfig, GameResult, Notation (SAN / PGN), SavedGame
           Everything above single-position level: history, repetition table,
           draw adjudication, clocks, timeout verdicts. No Swing widgets.
-ui/       MainFrame, StartScreen, GamePanel, BoardPanel, PieceRenderer, Sounds, Prefs
+net/      Protocol, ChessServer, ChessClient
+          Line-based socket protocol; the server referees with its own
+          GameSession per room, the client delivers messages on the EDT.
+ui/       MainFrame, StartScreen, OnlineLobbyPanel, GamePanel, BoardPanel,
+          PieceRenderer, Sounds, Prefs
           Swing only. Never mutates engine state directly — all moves flow
-          through GameSession.
-app/      Main (EDT bootstrap)
-test/     PerftTest, EngineTests, UiTests
+          through GameSession. MainFrame owns the online connection.
+app/      Main (EDT bootstrap), ServerMain (standalone relay server)
+test/     PerftTest, EngineTests, UiTests, NetTests
 ```
 
 ### Threading model
