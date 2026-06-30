@@ -15,7 +15,7 @@ public final class ServerMain {
         int port = args.length > 0 ? Integer.parseInt(args[0]) : Protocol.DEFAULT_PORT;
         ChessServer server = new ChessServer(port, false);
         server.start();
-        System.out.println("Chess server listening on port " + server.port() + " — Ctrl+C to stop.");
+        System.out.println("Chess server listening on port " + server.port() + " - Ctrl+C to stop.");
         Runtime.getRuntime().addShutdownHook(new Thread(server::close));
         Thread.currentThread().join();
     }
