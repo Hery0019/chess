@@ -75,7 +75,8 @@ Pick **Online 1 v 1** on the start screen, type a name and a `host:port`.
 
 ```bash
 ./build.sh          # Linux / macOS / Git Bash   (Windows PowerShell: .\build.ps1)
-java -jar chess.jar
+java -jar chess.jar                          # the game
+java -cp chess.jar app.ServerMain 5000       # optional: standalone online server
 ```
 
 The scripts compile into `out/` with `-Xlint:all,-serial` and package an
@@ -139,6 +140,16 @@ timeouts and New Game set it and discard the result. A stale-worker guard in
 worker harmless. The 100 ms UI timer is a *sampler* only: the clock is
 `nanoTime`-anchored, so timer drift cannot corrupt timekeeping.
 
+Online games keep that model intact: `ChessClient` reads the socket on its
+own thread but hands every message to the EDT (`invokeLater`, queued until a
+listener is installed), so `GamePanel` mutates the session from the EDT
+exactly as for a clicked move. `ChessServer` runs one accept thread and one
+reader thread per client; a room's state is guarded by the room's monitor and
+its referee `GameSession` is created without EDT confinement. When the server
+is embedded in the GUI ("Host game") all its threads are daemons, so closing
+the window ends it; `ServerMain` uses non-daemon threads and runs until
+killed.
+
 ## Recorded design trade-offs
 
 | Decision | Rationale | Cost accepted |
@@ -155,6 +166,10 @@ worker harmless. The 100 ms UI timer is a *sampler* only: the clock is
 | Unicode glyph rendering behind `PieceRenderer` | No binary assets in a source deliverable; font scan + letter fallback | Glyph aesthetics vary by platform; image renderer is a drop-in later |
 | Premoves = queue of (from, to) pairs, each resolved against the legal list when its turn arrives | Never submits an illegal move; no engine changes; a stale premove drops the queue | Later premoves are entered on a naively projected board (no legality); auto-queen on promotion; played by a one-shot timer after the AI move's slide |
 | Move animation paints the post-move board with the moving piece interpolated | No intermediate game state, nothing to roll back; a takeback mid-slide just draws the restored board | Captured piece vanishes at the start of the slide rather than on arrival |
+| Online: the server referees with its own `GameSession` and relays only legal, in-turn moves | Two honest clients can never diverge; a tampered client cannot cheat with nonsense; the engine's rules are reused unchanged | One extra move generation per move on the server; a desync (should never happen) aborts the game rather than guessing |
+| Online: each side runs its own clock and reports its *own* flag fall | No clock authority or latency protocol needed; an honest client cannot gain by lying about itself | Network latency is not compensated; a silent opponent is only dropped by the 30 s idle timeout |
+| Online: one plain-text line per message, names reduced to safe tokens | Debuggable with `telnet`/`nc`, trivial to parse, no framing bugs | No encryption or authentication — LAN / friends use only |
+| Online: colours by order of HELLO processing, time control from the first arrival | No negotiation round-trip; both clients simply obey `START` | The host cannot choose a colour; a joiner's time setting is ignored |
 | Drag state lives in `BoardPanel` alongside click selection | One `(from, targets)` model serves click-click, drag and premove; a drop is just a click on the target | Board is repainted on every drag event (fine at 8x8 with a single glyph) |
 | Full prior Zobrist hash stored in `Undo` | Unconditional unmake correctness for 8 bytes/ply | None meaningful |
 
@@ -187,3 +202,6 @@ worker harmless. The 100 ms UI timer is a *sampler* only: the clock is
 2. **Search is single-threaded** by design (correctness first).
 3. **No null-move pruning / aspiration windows** — deliberately left out
    until an engine-vs-engine harness exists to measure them.
+4. **Online play is unencrypted and unauthenticated**; clocks are not
+   latency-compensated; there is no takeback, chat or reconnection to a
+   game in progress (a dropped connection forfeits or aborts the game).
