@@ -11,8 +11,11 @@ import engine.Pieces;
  *                      (0) for an untimed game — no flag fall, clocks show
  *                      elapsed time instead
  * @param aiDepth       fixed search depth (approved: 1..5, no iterative deepening in v1)
+ * @param undoLimit     number of takebacks the human may use in the game
+ *                      (Human vs AI), or {@link #NO_UNDO} (0) when Undo is
+ *                      switched off for the game
  */
-public record GameConfig(Mode mode, int humanColor, int minutesPerSide, int aiDepth) {
+public record GameConfig(Mode mode, int humanColor, int minutesPerSide, int aiDepth, int undoLimit) {
 
     /** ONLINE: the local human plays {@code humanColor}, the other side is a remote player. */
     public enum Mode { HUMAN_VS_AI, AI_VS_AI, ONLINE }
@@ -20,13 +23,23 @@ public record GameConfig(Mode mode, int humanColor, int minutesPerSide, int aiDe
     /** {@code minutesPerSide} value meaning "no time control". */
     public static final int NO_CLOCK = 0;
 
+    /** {@code undoLimit} value meaning "Undo is disabled for this game". */
+    public static final int NO_UNDO = 0;
+
+    /** Takebacks allowed when the start screen is first shown. */
+    public static final int DEFAULT_UNDO_LIMIT = 3;
+
     public GameConfig {
         if (minutesPerSide < NO_CLOCK) throw new IllegalArgumentException("minutes >= 0");
         if (aiDepth < 1 || aiDepth > 6) throw new IllegalArgumentException("depth 1..6");
+        if (undoLimit < NO_UNDO) throw new IllegalArgumentException("undo limit >= 0");
     }
 
     /** False for an untimed game. */
     public boolean hasClock() { return minutesPerSide != NO_CLOCK; }
+
+    /** Can moves be taken back at all in this game? Only Human vs AI has takebacks. */
+    public boolean undoEnabled() { return mode == Mode.HUMAN_VS_AI && undoLimit != NO_UNDO; }
 
     /** Is the given engine color controlled by the AI under this config? */
     public boolean isAi(int color) {

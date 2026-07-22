@@ -39,15 +39,19 @@ opening book. Java 21, zero external dependencies.
 - **Promotion** opens a strip of four pieces on the board starting at the
   promotion square; click one to promote, click anywhere else to cancel.
 - **Undo** (Ctrl+Z, Human vs AI): takes back your last move and the AI's
-  reply — also while the AI is thinking, or after the game has ended.
+  reply — also while the AI is thinking, or after the game has ended. The
+  start screen decides whether takebacks exist at all (Undo Off / On) and,
+  when on, how many the game allows (1, 2, 3, 5 or 10 — 3 by default). The
+  button shows what is left ("Undo (2 left)") and greys out once the
+  allowance is spent; the count is kept in saved games.
 - **Move list** in standard algebraic notation beside the board, and
   **Export PGN…** to save the game (seven-tag roster + move text).
 - **Sounds** for move, capture, check and game end — synthesised at
   start-up (no audio files), switchable with the Sound checkbox, silent
   when no audio device exists.
 - **Save… / Resume a saved game…** write and reload a small text file
-  (`.chess`: settings, clocks, moves in long algebraic notation, replayed
-  and validated on load).
+  (`.chess`: settings, clocks, takebacks spent, moves in long algebraic
+  notation, replayed and validated on load).
 - **Resign** and **Offer draw** (Human vs AI): the AI accepts a draw when
   its last search rated its own position no better than about +0.30 and
   the game has left the opening; otherwise the offer is declined.

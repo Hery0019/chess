@@ -175,9 +175,9 @@ public final class NetTests {
             @Override public void startGame(game.GameConfig config) { }
         };
         SwingUtilities.invokeAndWait(() -> {
-            panels[0] = new ui.GamePanel(new game.GameConfig(game.GameConfig.Mode.ONLINE, colorA, 0, 1),
+            panels[0] = new ui.GamePanel(new game.GameConfig(game.GameConfig.Mode.ONLINE, colorA, 0, 1, game.GameConfig.NO_UNDO),
                     null, noHost, a, sa.arg(2), sa.arg(3));
-            panels[1] = new ui.GamePanel(new game.GameConfig(game.GameConfig.Mode.ONLINE, colorB, 0, 1),
+            panels[1] = new ui.GamePanel(new game.GameConfig(game.GameConfig.Mode.ONLINE, colorB, 0, 1, game.GameConfig.NO_UNDO),
                     null, noHost, b, sb.arg(2), sb.arg(3));
             a.setListener(routeTo(panels[0]));
             b.setListener(routeTo(panels[1]));

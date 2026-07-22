@@ -59,7 +59,7 @@ import java.util.function.Consumer;
  *
  * Presentation: a warm dark background carrying a faint board texture and
  * ghosted piece silhouettes, with a single cream "card" holding the options
- * as segmented pill controls (mode, side, time, AI strength) and one large
+ * as segmented pill controls (mode, side, time, AI strength, takebacks) and one large
  * primary Start button. Everything is custom-painted with plain Java2D so
  * the look does not depend on the platform look-and-feel; no assets.
  */
@@ -94,6 +94,9 @@ public final class StartScreen extends JPanel {
     private record TimeControl(int minutes) {
         String label() { return minutes == GameConfig.NO_CLOCK ? "None" : String.valueOf(minutes); }
     }
+
+    /** Takeback allowances offered when Undo is on. */
+    private static final List<Integer> UNDO_LIMITS = List.of(1, 2, 3, 5, 10);
 
     private static final String[] STRENGTH_HINTS = {
             "",
@@ -139,13 +142,33 @@ public final class StartScreen extends JPanel {
         JLabel strengthHint = label(STRENGTH_HINTS[depth.value()], font(Font.PLAIN, 12f), MUTED);
         depth.onChange(() -> strengthHint.setText(STRENGTH_HINTS[depth.value()]));
 
+        // Takebacks: an on/off switch and, when on, how many the game allows.
+        Segmented<Boolean> undo = new Segmented<>(List.of(Boolean.FALSE, Boolean.TRUE), List.of("Off", "On"), null, 1);
+        Segmented<Integer> undoLimit = new Segmented<>(UNDO_LIMITS,
+                UNDO_LIMITS.stream().map(String::valueOf).toList(), null,
+                UNDO_LIMITS.indexOf(GameConfig.DEFAULT_UNDO_LIMIT));
+        JLabel undoHint = label("", font(Font.PLAIN, 12f), MUTED);
+        Runnable syncUndo = () -> {
+            boolean humanVsAi = mode.value() == GameConfig.Mode.HUMAN_VS_AI;
+            undo.setEnabled(humanVsAi);
+            undoLimit.setEnabled(humanVsAi && undo.value());
+            int n = undoLimit.value();
+            undoHint.setText(!humanVsAi ? "Takebacks exist in Human vs AI games only"
+                    : !undo.value() ? "Off — every move is final"
+                    : "Up to " + n + (n == 1 ? " takeback" : " takebacks") + " per game (your move and the AI's reply)");
+        };
+        undo.onChange(syncUndo);
+        undoLimit.onChange(syncUndo);
+        JPanel takebacks = undoRow(undo, undoLimit);
+
         JTextField name = textField(onlineName == null ? "" : onlineName);
         JTextField address = textField(onlineAddress == null ? "" : onlineAddress);
         JPanel onlinePanel = onlinePanel(name, address);
 
         PrimaryButton start = new PrimaryButton("Start Game");
         start.addActionListener(e -> onStart.accept(new GameConfig(
-                mode.value(), side.value(), time.value().minutes(), depth.value())));
+                mode.value(), side.value(), time.value().minutes(), depth.value(),
+                undo.value() ? undoLimit.value() : GameConfig.NO_UNDO)));
         PrimaryButton hostGame = new PrimaryButton("Host game");
         PrimaryButton joinGame = new PrimaryButton("Join game");
         hostGame.addActionListener(e -> onOnline.accept(
@@ -164,12 +187,16 @@ public final class StartScreen extends JPanel {
         onlineActions.add(joinGame);
         actions.add(onlineActions, "online");
 
-        // Side and strength are meaningless in AI-vs-AI / online: disabled, not
+        // Side, strength and takebacks are meaningless in AI-vs-AI / online: disabled, not
         // hidden, so the layout stays stable and the causality is visible.
         Runnable syncMode = () -> {
             boolean online = mode.value() == GameConfig.Mode.ONLINE;
             side.setEnabled(mode.value() == GameConfig.Mode.HUMAN_VS_AI);
             depth.setEnabled(!online);
+            syncUndo.run();
+            // Online has no takebacks at all: the row makes way for the name / address fields.
+            takebacks.setVisible(!online);
+            undoHint.setVisible(!online);
             onlinePanel.setVisible(online);
             actionCards.show(actions, online ? "online" : "local");
             defaultButton = online ? joinGame : start;
@@ -185,6 +212,8 @@ public final class StartScreen extends JPanel {
             side.select(initial.humanColor());
             time.select(new TimeControl(initial.minutesPerSide()));
             depth.select(initial.aiDepth());
+            undo.select(initial.undoLimit() != GameConfig.NO_UNDO);
+            undoLimit.select(initial.undoLimit());   // a value not on offer keeps the default pill
         }
         syncMode.run();
 
@@ -199,22 +228,22 @@ public final class StartScreen extends JPanel {
         card.add(Box.createHorizontalStrut(CONTENT_WIDTH), c);
         card.add(header(), c);
 
-        c.insets = new Insets(22, 0, 0, 0);
+        c.insets = new Insets(18, 0, 0, 0);
         card.add(caption("Mode"), c);
         c.insets = new Insets(6, 0, 0, 0);
         card.add(mode, c);
 
-        c.insets = new Insets(18, 0, 0, 0);
+        c.insets = new Insets(14, 0, 0, 0);
         card.add(caption("Play as"), c);
         c.insets = new Insets(6, 0, 0, 0);
         card.add(side, c);
 
-        c.insets = new Insets(18, 0, 0, 0);
+        c.insets = new Insets(14, 0, 0, 0);
         card.add(caption("Time per side (minutes)"), c);
         c.insets = new Insets(6, 0, 0, 0);
         card.add(time, c);
 
-        c.insets = new Insets(18, 0, 0, 0);
+        c.insets = new Insets(14, 0, 0, 0);
         card.add(caption("AI strength"), c);
         c.insets = new Insets(6, 0, 0, 0);
         card.add(depth, c);
@@ -222,9 +251,14 @@ public final class StartScreen extends JPanel {
         card.add(strengthHint, c);
 
         c.insets = new Insets(14, 0, 0, 0);
+        card.add(takebacks, c);
+        c.insets = new Insets(6, 2, 0, 0);
+        card.add(undoHint, c);
+
+        c.insets = new Insets(14, 0, 0, 0);
         card.add(onlinePanel, c);
 
-        c.insets = new Insets(26, 0, 0, 0);
+        c.insets = new Insets(20, 0, 0, 0);
         card.add(actions, c);
 
         c.insets = new Insets(8, 0, 0, 0);
@@ -253,6 +287,34 @@ public final class StartScreen extends JPanel {
             JRootPane root = getRootPane();
             if (root != null) root.setDefaultButton(isShowing() ? defaultButton : null);
         });
+    }
+
+    // ---- takeback row ----
+
+    /** "Undo [Off | On]" beside "Takebacks per game [1 … 10]", each under its caption. */
+    private static JPanel undoRow(JComponent undo, JComponent limit) {
+        JPanel p = new JPanel(new GridBagLayout());
+        p.setOpaque(false);
+        GridBagConstraints c = new GridBagConstraints();
+        c.anchor = GridBagConstraints.WEST;
+        c.fill = GridBagConstraints.HORIZONTAL;
+        c.gridy = 0;
+        c.gridx = 0;
+        p.add(caption("Undo"), c);
+        c.gridx = 1;
+        c.weightx = 1;
+        c.insets = new Insets(0, 16, 0, 0);
+        p.add(caption("Takebacks per game"), c);
+        c.gridy = 1;
+        c.gridx = 0;
+        c.weightx = 0;
+        c.insets = new Insets(6, 0, 0, 0);
+        p.add(undo, c);
+        c.gridx = 1;
+        c.weightx = 1;
+        c.insets = new Insets(6, 16, 0, 0);
+        p.add(limit, c);
+        return p;
     }
 
     // ---- online sub-panel ----
@@ -393,7 +455,7 @@ public final class StartScreen extends JPanel {
         Card() {
             super(new GridBagLayout());
             setOpaque(false);
-            setBorder(BorderFactory.createEmptyBorder(30, 36, 28, 36));
+            setBorder(BorderFactory.createEmptyBorder(24, 36, 22, 36));
         }
 
         @Override

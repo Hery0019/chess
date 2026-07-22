@@ -50,7 +50,8 @@ final class Prefs {
             String mode = P.get("cfg.mode", null);
             if (mode == null) return null;
             return new GameConfig(GameConfig.Mode.valueOf(mode), P.getInt("cfg.human", 0),
-                    P.getInt("cfg.minutes", GameConfig.NO_CLOCK), P.getInt("cfg.depth", 4));
+                    P.getInt("cfg.minutes", GameConfig.NO_CLOCK), P.getInt("cfg.depth", 4),
+                    P.getInt("cfg.undo", GameConfig.DEFAULT_UNDO_LIMIT));
         } catch (RuntimeException e) {
             return null;
         }
@@ -79,6 +80,7 @@ final class Prefs {
             P.putInt("cfg.human", c.humanColor());
             P.putInt("cfg.minutes", c.minutesPerSide());
             P.putInt("cfg.depth", c.aiDepth());
+            P.putInt("cfg.undo", c.undoLimit());
         } catch (RuntimeException ignored) { }
     }
 }
