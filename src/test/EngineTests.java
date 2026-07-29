@@ -32,6 +32,9 @@ public final class EngineTests {
         searchAvoidsRepetitionWhenWinning();
         searchIterativeDeepening();
         searchReusesTableAcrossCalls();
+        staticExchange();
+        nullMoveRoundTrip();
+        pruningSavesNodes();
         openingBook();
         sanNotation();
         pgnExport();
@@ -251,10 +254,10 @@ public final class EngineTests {
                 && fixed.pv().get(0).equals(fixed.bestMove()));
 
         long t0 = System.nanoTime();
-        Search.Result timed = new Search().findBest(b, 12, 150, null, new AtomicBoolean(false));
+        Search.Result timed = new Search().findBest(b, 30, 150, null, new AtomicBoolean(false));
         long ms = (System.nanoTime() - t0) / 1_000_000L;
         check("search: time budget returns a completed iteration quickly",
-                timed != null && timed.bestMove() != null && timed.depth() >= 1 && timed.depth() < 12 && ms < 2_000);
+                timed != null && timed.bestMove() != null && timed.depth() >= 1 && timed.depth() < 30 && ms < 2_000);
 
         AtomicBoolean cancelled = new AtomicBoolean(true);
         check("search: cancelled search returns null",
@@ -270,6 +273,57 @@ public final class EngineTests {
         check("search: table reuse keeps the mate-in-2 answer",
                 r1 != null && r2 != null && r1.score() == Search.MATE_SCORE - 3
                 && r2.score() == Search.MATE_SCORE - 3 && r2.bestMove().equals(r1.bestMove()));
+    }
+
+    private static void staticExchange() {
+        MoveGenerator gen = new MoveGenerator();
+        // The two classic examples: Rxe5 simply wins a pawn; Nxe5 wins the pawn
+        // but the recapture sequence (with the queen x-raying through the
+        // bishop and the queen behind the rook) ends a knight for a pawn down.
+        Board b1 = Board.fromFen("1k1r4/1pp4p/p7/4p3/8/P5P1/1PP4P/2K1R3 w - - 0 1");
+        Board b2 = Board.fromFen("1k1r3q/1ppn3p/p4b2/4p3/8/P2N2P1/1PP1R1BP/2K1Q3 w - - 0 1");
+        check("see: rook takes an undefended pawn = +100",
+                StaticExchange.see(b1, findMove(gen.generateLegal(b1), "e1e5")) == 100);
+        check("see: knight takes a defended pawn = -220 (x-rays counted)",
+                StaticExchange.see(b2, findMove(gen.generateLegal(b2), "d3e5")) == -220);
+        // Rook takes a pawn defended by a rook: pawn won, rook lost.
+        Board b3 = Board.fromFen("4k3/3r4/8/3p4/8/8/8/3RK3 w - - 0 1");
+        check("see: rook takes a rook-defended pawn = -400",
+                StaticExchange.see(b3, findMove(gen.generateLegal(b3), "d1d5")) == -400);
+        // Rook takes a queen defended by a rook: queen won, rook lost.
+        Board b4 = Board.fromFen("4k3/3r4/8/3q4/8/8/8/3RK3 w - - 0 1");
+        check("see: rook takes a rook-defended queen = +400",
+                StaticExchange.see(b4, findMove(gen.generateLegal(b4), "d1d5")) == 400);
+    }
+
+    private static void nullMoveRoundTrip() {
+        Board b = Board.fromFen("rnbqkbnr/pppp1ppp/8/4p3/4P3/8/PPPP1PPP/RNBQKBNR w KQkq e6 0 2");
+        long before = b.zobristKey();
+        Undo u = new Undo();
+        b.makeNullMove(u);
+        check("null move: side flips, ep cleared, hash matches scratch",
+                b.sideToMove() == BLACK && b.epSquare() == -1
+                && b.zobristKey() == Zobrist.computeFromScratch(b) && b.zobristKey() != before);
+        b.unmakeNullMove(u);
+        check("null move: unmake restores the position",
+                b.sideToMove() == WHITE && b.epSquare() == 44 && b.zobristKey() == before && b.halfmoveClock() == 0);
+        check("null move: non-pawn material guard",
+                b.hasNonPawnMaterial(WHITE)
+                && !Board.fromFen("4k3/8/8/8/8/8/4P3/4K3 w - - 0 1").hasNonPawnMaterial(WHITE));
+    }
+
+    private static void pruningSavesNodes() {
+        // The point of the selectivity: the same depth for a fraction of the nodes.
+        Board b = Board.fromFen("r4rk1/1pp1qppp/p1np1n2/2b1p1B1/2B1P1b1/P1NP1N2/1PP1QPPP/R4RK1 w - - 0 10");
+        Search.Result full = new Search(16, Search.Options.ALL).findBest(b, 5, new AtomicBoolean(false));
+        Search.Result plain = new Search(16, Search.Options.BASELINE).findBest(b, 5, new AtomicBoolean(false));
+        check("pruning: depth 5 costs under half the nodes of plain alpha-beta",
+                full != null && plain != null && full.nodes() * 2 < plain.nodes());
+        // The mate tests above run with every technique on; the plain engine must agree.
+        Board mate = Board.fromFen("k7/8/8/8/8/8/5KR1/7R w - - 0 1");
+        check("pruning: forced mate scores identically without pruning",
+                new Search(16, Search.Options.BASELINE).findBest(mate, 5, new AtomicBoolean(false)).score()
+                        == Search.MATE_SCORE - 3);
     }
 
     private static void openingBook() {

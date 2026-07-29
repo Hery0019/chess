@@ -232,6 +232,50 @@ public final class Board {
         zobrist = u.zobrist;                // full restore — no incremental undo
     }
 
+    // ---- null move (search only) ----
+
+    /**
+     * Passes the turn without moving — the "null move" of null-move pruning.
+     * Only the side to move, the en-passant square and the hash change;
+     * restore with {@link #unmakeNullMove}. Never legal in a game.
+     */
+    public void makeNullMove(Undo u) {
+        u.captured = EMPTY;
+        u.castlingRights = castlingRights;
+        u.epSquare = epSquare;
+        u.halfmoveClock = halfmoveClock;
+        u.zobrist = zobrist;
+        if (epSquare != -1) {
+            zobrist ^= Zobrist.EP_FILE[epSquare & 7];
+            epSquare = -1;
+        }
+        halfmoveClock++;
+        sideToMove ^= 1;
+        zobrist ^= Zobrist.SIDE_TO_MOVE;
+    }
+
+    public void unmakeNullMove(Undo u) {
+        sideToMove ^= 1;
+        epSquare = u.epSquare;
+        halfmoveClock = u.halfmoveClock;
+        zobrist = u.zobrist;
+    }
+
+    /**
+     * Does {@code color} own anything besides pawns and the king? Null-move
+     * pruning is switched off without it: pawn endings are where passing
+     * would be a real advantage (zugzwang), which breaks the null-move logic.
+     */
+    public boolean hasNonPawnMaterial(int color) {
+        for (int sq = 0; sq < 64; sq++) {
+            int p = squares[sq];
+            if (p == EMPTY || colorOf(p) != color) continue;
+            int t = typeOf(p);
+            if (t != PAWN && t != KING) return true;
+        }
+        return false;
+    }
+
     // ---- attack queries ----
 
     public boolean inCheck(int color) {
