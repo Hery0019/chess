@@ -50,11 +50,13 @@ public final class GamePanel extends JPanel {
     private final BoardPanel boardPanel;
     private final JLabel topClockLabel = new JLabel();
     private final JLabel bottomClockLabel = new JLabel();
+    private final JLabel topNameLabel = new JLabel();
+    private final JLabel bottomNameLabel = new JLabel();
     private final JLabel statusLabel = new JLabel();
     private final JButton pauseButton = new JButton("Pause");
     private final Timer uiTimer;
 
-    private final int topColor;      // color shown at the top of the window
+    private int topColor;            // color shown at the top of the window
     private AiWorker activeWorker;
     private boolean paused = false;
 
@@ -81,21 +83,25 @@ public final class GamePanel extends JPanel {
         }
         statusLabel.setFont(statusLabel.getFont().deriveFont(14f));
 
+        updateNameLabels();
         JPanel top = new JPanel(new FlowLayout(FlowLayout.LEFT));
-        top.add(new JLabel(playerName(topColor) + ":"));
+        top.add(topNameLabel);
         top.add(topClockLabel);
 
         JPanel controls = new JPanel(new FlowLayout(FlowLayout.RIGHT));
         pauseButton.setVisible(config.mode() == GameConfig.Mode.AI_VS_AI);
         pauseButton.addActionListener(e -> togglePause());
+        JButton flipBoard = new JButton("Flip Board");
+        flipBoard.addActionListener(e -> flipBoard());
         JButton newGame = new JButton("New Game");
         newGame.addActionListener(e -> onNewGame.run());
+        controls.add(flipBoard);
         controls.add(pauseButton);
         controls.add(newGame);
 
         JPanel bottom = new JPanel(new BorderLayout());
         JPanel bottomLeft = new JPanel(new FlowLayout(FlowLayout.LEFT));
-        bottomLeft.add(new JLabel(playerName(topColor ^ 1) + ":"));
+        bottomLeft.add(bottomNameLabel);
         bottomLeft.add(bottomClockLabel);
         bottomLeft.add(statusLabel);
         bottom.add(bottomLeft, BorderLayout.CENTER);
@@ -112,6 +118,20 @@ public final class GamePanel extends JPanel {
     private String playerName(int color) {
         String base = GameConfig.colorName(color);
         return config.isAi(color) ? base + " (AI, depth " + config.aiDepth() + ")" : base;
+    }
+
+    private void updateNameLabels() {
+        topNameLabel.setText(playerName(topColor) + ":");
+        bottomNameLabel.setText(playerName(topColor ^ 1) + ":");
+    }
+
+    /** Rotates the board view 180° and swaps the clock/name rows to match.
+     *  Pure view change: game state, clocks and interaction are untouched. */
+    private void flipBoard() {
+        topColor ^= 1;
+        boardPanel.setFlipped(topColor == Pieces.WHITE);
+        updateNameLabels();
+        refresh();
     }
 
     /** Called once by MainFrame after the panel is shown. */
