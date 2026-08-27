@@ -71,7 +71,9 @@ public final class GamePanel extends JPanel {
         boolean flipped = config.mode() == GameConfig.Mode.HUMAN_VS_AI
                 && config.humanColor() == Pieces.BLACK;
         this.topColor = flipped ? Pieces.WHITE : Pieces.BLACK;
-        this.boardPanel = new BoardPanel(session, flipped, this::onHumanMove);
+        // Premoves are only meaningful when a human is waiting on the AI.
+        int humanColor = config.mode() == GameConfig.Mode.HUMAN_VS_AI ? config.humanColor() : -1;
+        this.boardPanel = new BoardPanel(session, flipped, humanColor, this::onHumanMove);
 
         Font clockFont = new Font(Font.MONOSPACED, Font.BOLD, 22);
         topClockLabel.setFont(clockFont);
@@ -181,6 +183,15 @@ public final class GamePanel extends JPanel {
         int stm = session.sideToMove();
         if (!config.isAi(stm)) {
             boardPanel.setInteractionEnabled(true);
+            // A premove entered while the AI was thinking is played at once
+            // if it is legal here; consumePremove() drops it otherwise. It
+            // goes through the same path as a clicked move, so the AI reply
+            // is kicked off by the nested afterMoveApplied().
+            Move premove = boardPanel.consumePremove();
+            if (premove != null) {
+                session.applyMove(premove);
+                afterMoveApplied();
+            }
             return;
         }
         boardPanel.setInteractionEnabled(false);
@@ -238,6 +249,7 @@ public final class GamePanel extends JPanel {
             status = "Paused";
         } else if (activeWorker != null) {
             status = "AI is thinking\u2026";
+            if (boardPanel.hasPremove()) status += "   (premove: " + boardPanel.premoveText() + ")";
         } else {
             status = session.statusText();
         }

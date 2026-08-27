@@ -4,6 +4,23 @@ A complete chess game: Human vs AI and AI vs AI, full FIDE move rules, optional
 chess clocks (or an untimed game), and a fixed-depth negamax (minimax + alpha-beta) engine with
 quiescence search. Java 21, zero external dependencies.
 
+## Playing
+
+- **Move by click-click or drag & drop.** Click a piece (legal destinations
+  are marked) then click a destination, or press on a piece and drag it onto
+  its destination. Dropping a piece back on its own square keeps it selected;
+  dropping it anywhere illegal snaps it back.
+- **Premoves (chess.com style).** While the AI is thinking you can already
+  enter your reply: pick one of your pieces and choose any square it could
+  reach on an empty board (blockers are ignored — the position will change).
+  The premove is highlighted in red with the piece ghosted on its destination
+  and echoed in the status line. As soon as it is your turn the premove is
+  played instantly if it is legal in the new position (promotions default to
+  a queen), otherwise it is silently dropped. Any left-click on the board
+  cancels a pending premove (and may start a new one); right-click cancels
+  without selecting. One premove is held at a time.
+- **Flip Board** rotates the view; **New Game** returns to the start screen.
+
 ## Build & run
 
 ```
@@ -65,6 +82,8 @@ worker harmless. The 100 ms UI timer is a *sampler* only: the clock is
 | No mobility term | Requires movegen inside the hottest function; poor value at this depth | Weaker positional play |
 | All draws auto-declared | No claim UI; unambiguous verdicts | Diverges from OTB claim rules (accepted spec) |
 | Unicode glyph rendering behind `PieceRenderer` | No binary assets in a source deliverable; font scan + letter fallback | Glyph aesthetics vary by platform; image renderer is a drop-in later |
+| Premove = one (from, to) pair, resolved against the legal list when the turn arrives | Never submits an illegal move; no engine changes; a stale premove simply evaporates | Single premove only (no queue); auto-queen on promotion; played synchronously in the AI's `done()`, so the AI's move and the premove appear in one frame |
+| Drag state lives in `BoardPanel` alongside click selection | One `(from, targets)` model serves click-click, drag and premove; a drop is just a click on the target | Board is repainted on every drag event (fine at 8x8 with a single glyph) |
 | Full prior Zobrist hash stored in `Undo` | Unconditional unmake correctness for 8 bytes/ply | None meaningful |
 
 ## Known limitations (deliberate v1 scope, in priority order for v2)
