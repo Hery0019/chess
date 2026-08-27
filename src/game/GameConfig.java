@@ -1,6 +1,7 @@
 package game;
 
 import engine.Pieces;
+import engine.Skill;
 
 /**
  * Immutable game configuration produced by the start screen.
@@ -10,22 +11,19 @@ import engine.Pieces;
  * @param minutesPerSide chess clock allotment per player, or {@link #NO_CLOCK}
  *                      (0) for an untimed game — no flag fall, clocks show
  *                      elapsed time instead
- * @param aiDepth       maximum search depth, 1..10: iterative deepening stops
- *                      there, or earlier when the time budget runs out
+ * @param aiLevel       playing strength, 1..{@link Skill#MAX}; each level is
+ *                      labelled with an approximate Elo (see {@link Skill})
  * @param undoLimit     number of takebacks the human may use in the game
  *                      (Human vs AI), or {@link #NO_UNDO} (0) when Undo is
  *                      switched off for the game
  */
-public record GameConfig(Mode mode, int humanColor, int minutesPerSide, int aiDepth, int undoLimit) {
+public record GameConfig(Mode mode, int humanColor, int minutesPerSide, int aiLevel, int undoLimit) {
 
     /** ONLINE: the local human plays {@code humanColor}, the other side is a remote player. */
     public enum Mode { HUMAN_VS_AI, AI_VS_AI, ONLINE }
 
     /** {@code minutesPerSide} value meaning "no time control". */
     public static final int NO_CLOCK = 0;
-
-    /** Deepest search the start screen offers. */
-    public static final int MAX_DEPTH = 10;
 
     /** {@code undoLimit} value meaning "Undo is disabled for this game". */
     public static final int NO_UNDO = 0;
@@ -35,7 +33,7 @@ public record GameConfig(Mode mode, int humanColor, int minutesPerSide, int aiDe
 
     public GameConfig {
         if (minutesPerSide < NO_CLOCK) throw new IllegalArgumentException("minutes >= 0");
-        if (aiDepth < 1 || aiDepth > MAX_DEPTH) throw new IllegalArgumentException("depth 1.." + MAX_DEPTH);
+        if (aiLevel < Skill.MIN || aiLevel > Skill.MAX) throw new IllegalArgumentException("level " + Skill.MIN + ".." + Skill.MAX);
         if (undoLimit < NO_UNDO) throw new IllegalArgumentException("undo limit >= 0");
     }
 

@@ -6,6 +6,7 @@ import engine.MoveGenerator;
 import engine.OpeningBook;
 import engine.Pieces;
 import engine.Search;
+import engine.Skill;
 import game.GameResult;
 import game.GameSession;
 
@@ -18,34 +19,48 @@ import java.util.concurrent.ExecutorCompletionService;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
- * Engine-vs-engine harness: plays two feature sets of {@link Search} against
+ * Engine-vs-engine harness: plays two configurations of the engine against
  * each other from the opening-book lines (every opening twice, colours
  * swapped) and reports the score as an Elo difference with a 95% interval
  * and the likelihood of superiority. This is how a search or evaluation
  * change earns its place in this project: a technique that does not win
- * games at equal time is not kept.
+ * games at equal time is not kept. It also measures the spacing of the
+ * {@link Skill} levels.
  *
  * <pre>
  * java -cp out test.Arena [games=40] [movetime=100 | depth=4] [threads=cores/2]
  *                         [a=all] [b=baseline] [tt=16] [maxplies=300]
  * </pre>
- * A feature spec is {@code all}, {@code baseline}, or a comma list of
- * {@code pvs, nullmove, lmr, futility, aspiration, see, structure, mobility, pesto};
- * a name prefixed with {@code -} removes it ({@code all,-mobility} measures
- * mobility alone). Games are adjudicated when both engines have agreed for
- * eight plies that one side is up more than a queen, and drawn at the ply
- * limit. Not part of the test runners: a match takes minutes and its verdict
- * is statistical.
+ * A side is either a feature spec — {@code all}, {@code baseline}, or a
+ * comma list of {@code pvs, nullmove, lmr, futility, aspiration, see,
+ * structure, mobility, pesto}, a name prefixed with {@code -} removing it
+ * ({@code all,-mobility} measures mobility alone) — or a strength level,
+ * {@code level3}, which plays like the game's level 3 (its own depth and
+ * noise; the time control is then ignored). Games are adjudicated when
+ * both engines have agreed for eight plies that one side is up more than a
+ * queen, and drawn at the ply limit. Not part of the test runners: a match
+ * takes minutes and its verdict is statistical.
  */
 public final class Arena {
 
     private static final String[] FEATURES =
             {"pvs", "nullmove", "lmr", "futility", "aspiration", "see", "structure", "mobility", "pesto"};
+    private static final Pattern LEVEL_SPEC = Pattern.compile("(?i)level\\s*(\\d+)");
     /** Plies of each book line replayed before the engines take over. */
     private static final int OPENING_PLIES = 8;
     private static final int ADJUDICATE_SCORE = 900, ADJUDICATE_PLIES = 8;
+
+    /** One side of the match: a feature set at full strength, or a {@link Skill} level (features all on). */
+    record Side(Search.Options options, int level) {
+        Search.Result move(Search search, Board b, int depth, long movetime, long[] keys, AtomicBoolean cancel) {
+            if (level > 0) return Skill.choose(search, level, b, movetime, keys, cancel);
+            return search.findBest(b, depth > 0 ? depth : 64, movetime, keys, cancel);
+        }
+    }
 
     private record Game(int index, String opening, String name, int aColor) {}
     private record Outcome(Game game, double aScore, int plies, String how) {}
@@ -70,7 +85,7 @@ public final class Arena {
                 default -> throw new IllegalArgumentException("unknown option " + k);
             }
         }
-        Search.Options a = parse(specA), b = parse(specB);
+        Side a = parse(specA), b = parse(specB);
         System.out.printf(Locale.ROOT, "A = %s%nB = %s%n%d games, %s, %d thread(s), TT 2^%d, draw at %d plies%n%n",
                 describe(a), describe(b), games,
                 depth > 0 ? "depth " + depth : movetime + " ms/move", threads, ttBits, maxPlies);
@@ -111,8 +126,7 @@ public final class Arena {
 
     // ---- one game ----
 
-    private static Outcome play(Game g, Search.Options a, Search.Options b,
-                                int depth, int movetime, int ttBits, int maxPlies) {
+    private static Outcome play(Game g, Side a, Side b, int depth, int movetime, int ttBits, int maxPlies) {
         GameSession s = new GameSession(Board.startPosition(), false);
         MoveGenerator gen = new MoveGenerator();
         for (String token : g.opening().split(" ")) {
@@ -121,9 +135,12 @@ public final class Arena {
             if (move == null) throw new IllegalStateException("opening: illegal move " + token);
             s.applyMove(move);
         }
+        Side[] sides = new Side[2];
         Search[] engines = new Search[2];
-        engines[g.aColor()] = new Search(ttBits, a);
-        engines[g.aColor() ^ 1] = new Search(ttBits, b);
+        sides[g.aColor()] = a;
+        sides[g.aColor() ^ 1] = b;
+        engines[g.aColor()] = new Search(ttBits, a.options());
+        engines[g.aColor() ^ 1] = new Search(ttBits, b.options());
         AtomicBoolean never = new AtomicBoolean(false);
 
         int agree = 0;                       // +n: n plies of "White is winning", -n: Black
@@ -132,8 +149,7 @@ public final class Arena {
         while (s.result() == GameResult.ONGOING) {
             if (s.plyCount() >= maxPlies) { how = "ply limit"; break; }
             int stm = s.sideToMove();
-            Search.Result r = engines[stm].findBest(s.board(), depth > 0 ? depth : 64, movetime,
-                    s.priorPositionKeys(), never);
+            Search.Result r = sides[stm].move(engines[stm], s.board(), depth, movetime, s.priorPositionKeys(), never);
             if (r == null || r.bestMove() == null) break;
             s.applyMove(r.bestMove());
             int whiteView = stm == Pieces.WHITE ? r.score() : -r.score();
@@ -181,9 +197,11 @@ public final class Arena {
         return x >= 0 ? y : -y;
     }
 
-    // ---- feature specs ----
+    // ---- side specs ----
 
-    static Search.Options parse(String spec) {
+    static Side parse(String spec) {
+        Matcher lm = LEVEL_SPEC.matcher(spec.trim());
+        if (lm.matches()) return new Side(Search.Options.ALL, Integer.parseInt(lm.group(1)));
         boolean[] f = new boolean[FEATURES.length];
         for (String part : spec.split(",")) {
             String p = part.trim().toLowerCase(Locale.ROOT);
@@ -195,10 +213,12 @@ public final class Arena {
             if (i < 0) throw new IllegalArgumentException("unknown feature " + p + "; known: " + String.join(", ", FEATURES));
             f[i] = on;
         }
-        return new Search.Options(f[0], f[1], f[2], f[3], f[4], f[5], f[6], f[7], f[8]);
+        return new Side(new Search.Options(f[0], f[1], f[2], f[3], f[4], f[5], f[6], f[7], f[8]), 0);
     }
 
-    static String describe(Search.Options o) {
+    static String describe(Side side) {
+        if (side.level() > 0) return "level " + side.level() + " (" + Skill.eloLabel(side.level()) + ")";
+        Search.Options o = side.options();
         if (o.equals(Search.Options.ALL)) return "all";
         if (o.equals(Search.Options.BASELINE)) return "baseline";
         boolean[] f = {o.pvs(), o.nullMove(), o.lmr(), o.futility(), o.aspiration(), o.see(), o.pawnStructure(),

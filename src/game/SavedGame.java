@@ -2,6 +2,7 @@ package game;
 
 import engine.Move;
 import engine.Pieces;
+import engine.Skill;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -18,7 +19,7 @@ import java.util.List;
  * mode HUMAN_VS_AI
  * human WHITE
  * minutes 10
- * depth 4
+ * level 5
  * undo-limit 3
  * undo-used 1
  * used 12345 6789
@@ -26,7 +27,9 @@ import java.util.List;
  * </pre>
  *
  * The two {@code undo-*} lines are optional so files written before the
- * Undo setting existed still load (with the default limit, none spent).
+ * Undo setting existed still load (with the default limit, none spent);
+ * older files carry {@code depth N} instead of {@code level N} and are
+ * mapped to the level of similar strength.
  *
  * @param undoUsed takebacks already spent in this game (counts against
  *                 {@link GameConfig#undoLimit()})
@@ -54,7 +57,7 @@ public record SavedGame(GameConfig config, List<String> moves, long whiteUsedMil
                 + "mode " + config.mode() + "\n"
                 + "human " + GameConfig.colorName(config.humanColor()).toUpperCase() + "\n"
                 + "minutes " + config.minutesPerSide() + "\n"
-                + "depth " + config.aiDepth() + "\n"
+                + "level " + config.aiLevel() + "\n"
                 + "undo-limit " + config.undoLimit() + "\n"
                 + "undo-used " + undoUsed + "\n"
                 + "used " + whiteUsedMillis + " " + blackUsedMillis + "\n"
@@ -68,7 +71,7 @@ public record SavedGame(GameConfig config, List<String> moves, long whiteUsedMil
             throw new IllegalArgumentException("not a chess save file");
         }
         GameConfig.Mode mode = null;
-        int human = -1, minutes = -1, depth = -1;
+        int human = -1, minutes = -1, level = -1;
         int undoLimit = GameConfig.DEFAULT_UNDO_LIMIT, undoUsed = 0;
         long whiteUsed = -1, blackUsed = -1;
         List<String> moves = null;
@@ -87,7 +90,8 @@ public record SavedGame(GameConfig config, List<String> moves, long whiteUsedMil
                         default -> throw new IllegalArgumentException("bad colour " + value);
                     };
                     case "minutes" -> minutes = Integer.parseInt(value);
-                    case "depth" -> depth = Integer.parseInt(value);
+                    case "level" -> level = Integer.parseInt(value);
+                    case "depth" -> level = Math.max(Skill.MIN, Math.min(Skill.MAX, Integer.parseInt(value) + 2));   // pre-level files
                     case "undo-limit" -> undoLimit = Integer.parseInt(value);
                     case "undo-used" -> undoUsed = Integer.parseInt(value);
                     case "used" -> {
@@ -102,7 +106,7 @@ public record SavedGame(GameConfig config, List<String> moves, long whiteUsedMil
                 throw new IllegalArgumentException("bad save line " + (i + 1) + ": " + line, e);
             }
         }
-        if (mode == null || human < 0 || minutes < 0 || depth < 0 || whiteUsed < 0 || moves == null) {
+        if (mode == null || human < 0 || minutes < 0 || level < 0 || whiteUsed < 0 || moves == null) {
             throw new IllegalArgumentException("incomplete save file");
         }
         for (String m : moves) {
@@ -110,7 +114,7 @@ public record SavedGame(GameConfig config, List<String> moves, long whiteUsedMil
         }
         GameConfig config;
         try {
-            config = new GameConfig(mode, human, minutes, depth, undoLimit);
+            config = new GameConfig(mode, human, minutes, level, undoLimit);
         } catch (IllegalArgumentException e) {
             throw new IllegalArgumentException("bad settings: " + e.getMessage(), e);
         }

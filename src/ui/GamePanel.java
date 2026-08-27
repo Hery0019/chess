@@ -3,6 +3,7 @@ package ui;
 import engine.Board;
 import engine.Move;
 import engine.OpeningBook;
+import engine.Skill;
 import engine.Pieces;
 import engine.Search;
 import game.ChessClock;
@@ -296,13 +297,13 @@ public final class GamePanel extends JPanel {
     private String playerName(int color) {
         String base = GameConfig.colorName(color);
         if (isOnline()) return names[color] + " (" + base + (color == config.humanColor() ? ", you)" : ")");
-        return config.isAi(color) ? base + " (AI, depth " + config.aiDepth() + ")" : base;
+        return config.isAi(color) ? base + " (AI, " + Skill.eloLabel(config.aiLevel()) + ")" : base;
     }
 
     /** Name for the PGN tags: who actually played the side. */
     private String pgnName(int color) {
         if (isOnline()) return names[color];
-        return config.isAi(color) ? "AI (depth " + config.aiDepth() + ")" : "Human";
+        return config.isAi(color) ? "AI (level " + config.aiLevel() + ", " + Skill.eloLabel(config.aiLevel()) + ")" : "Human";
     }
 
     private void updateNameLabels() {
@@ -417,7 +418,7 @@ public final class GamePanel extends JPanel {
     /** Same settings, colours swapped (Human vs AI). */
     private GameConfig rematchConfig() {
         if (config.mode() != GameConfig.Mode.HUMAN_VS_AI) return config;
-        return new GameConfig(config.mode(), config.humanColor() ^ 1, config.minutesPerSide(), config.aiDepth(),
+        return new GameConfig(config.mode(), config.humanColor() ^ 1, config.minutesPerSide(), config.aiLevel(),
                 config.undoLimit());
     }
 
@@ -571,7 +572,7 @@ public final class GamePanel extends JPanel {
         if (activeWorker != null) return;   // one at a time; defensive
         long minMillis = config.mode() == GameConfig.Mode.AI_VS_AI ? AI_VS_AI_MIN_MOVE_MS : 0;
         activeWorker = new AiWorker(session.board().copy(), session.priorPositionKeys(),
-                config.aiDepth(), timeBudgetMillis(stm), minMillis);
+                config.aiLevel(), timeBudgetMillis(stm), minMillis);
         activeWorker.execute();
         refresh();
     }
@@ -848,14 +849,14 @@ public final class GamePanel extends JPanel {
         final AtomicBoolean cancelFlag = new AtomicBoolean(false);
         private final Board snapshot;
         private final long[] priorKeys;
-        private final int depth;
+        private final int level;
         private final long budgetMillis;
         private final long minMillis;
 
-        AiWorker(Board snapshot, long[] priorKeys, int depth, long budgetMillis, long minMillis) {
+        AiWorker(Board snapshot, long[] priorKeys, int level, long budgetMillis, long minMillis) {
             this.snapshot = snapshot;
             this.priorKeys = priorKeys;
-            this.depth = depth;
+            this.level = level;
             this.budgetMillis = budgetMillis;
             this.minMillis = minMillis;
         }
@@ -863,11 +864,11 @@ public final class GamePanel extends JPanel {
         @Override
         protected Search.Result doInBackground() {
             long t0 = System.currentTimeMillis();
-            // Opening book first: a book move is reported as depth 0.
-            Move book = OpeningBook.probe(snapshot);
+            // Opening book first (strong levels only): a book move is reported as depth 0.
+            Move book = Skill.level(level).book() ? OpeningBook.probe(snapshot) : null;
             Search.Result r = book != null
                     ? new Search.Result(book, 0, 0, 0, List.of(book), 0)
-                    : engine.findBest(snapshot, depth, budgetMillis, priorKeys, cancelFlag);
+                    : Skill.choose(engine, level, snapshot, budgetMillis, priorKeys, cancelFlag);
             if (r == null) return null;   // cancelled
             // Pacing (AI-vs-AI): instant replies make games unwatchable.
             long elapsed = System.currentTimeMillis() - t0;

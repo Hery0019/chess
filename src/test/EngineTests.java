@@ -35,6 +35,7 @@ public final class EngineTests {
         staticExchange();
         nullMoveRoundTrip();
         pruningSavesNodes();
+        skillLevels();
         openingBook();
         sanNotation();
         pgnExport();
@@ -324,6 +325,47 @@ public final class EngineTests {
         check("pruning: forced mate scores identically without pruning",
                 new Search(16, Search.Options.BASELINE).findBest(mate, 5, new AtomicBoolean(false)).score()
                         == Search.MATE_SCORE - 3);
+    }
+
+    private static void skillLevels() {
+        check("skill: levels are numbered 1..MAX with rising Elo and depth",
+                Skill.LEVELS.size() == Skill.MAX && Skill.level(1).elo() == 500
+                && Skill.level(Skill.MAX).elo() > Skill.level(1).elo()
+                && Skill.level(Skill.MAX).depth() >= Skill.level(1).depth() && Skill.level(Skill.MAX).noiseCp() == 0);
+        Search s = new Search(16);
+        Board start = Board.startPosition();
+        // A weak level plays a legal move and reports the true score of what it picked.
+        Search.Result weak = Skill.choose(s, 1, start, 0, null, new AtomicBoolean(false), new Random(7));
+        check("skill: level 1 plays a legal move",
+                weak != null && new MoveGenerator().generateLegal(start).contains(weak.bestMove()) && weak.depth() == 1);
+        // Noise never beats a forced mate: a mate score dwarfs any noise level.
+        Board mate = Board.fromFen("6k1/5ppp/8/8/8/8/8/R6K w - - 0 1");
+        boolean alwaysMates = true;
+        for (int seed = 0; seed < 10 && alwaysMates; seed++) {
+            Search.Result r = Skill.choose(s, 2, mate, 0, null, new AtomicBoolean(false), new Random(seed));
+            alwaysMates = r != null && r.bestMove().toString().equals("a1a8") && r.isMate();
+        }
+        check("skill: noisy levels still play a mate in one", alwaysMates);
+        // Weak levels do err: over many picks from a position with one clearly best capture, level 1 sometimes misses it.
+        Board hanging = Board.fromFen("rnbqkbnr/pppp1ppp/8/4p3/3P4/8/PPP1PPPP/RNBQKBNR w KQkq - 0 2");   // d4xe5 wins a pawn
+        int misses = 0;
+        for (int seed = 0; seed < 30; seed++) {
+            Search.Result r = Skill.choose(s, 1, hanging, 0, null, new AtomicBoolean(false), new Random(seed));
+            if (!r.bestMove().toString().equals("d4e5")) misses++;
+        }
+        check("skill: level 1 misses a free pawn sometimes (" + misses + "/30)", misses > 0 && misses < 30);
+        // The top level is the full engine; a cancelled weak-level pick returns null like the search does.
+        check("skill: top level is the plain search",
+                Skill.choose(s, Skill.MAX, mate, 0, null, new AtomicBoolean(false)).bestMove().toString().equals("a1a8")
+                && Skill.choose(s, 1, start, 0, null, new AtomicBoolean(true)) == null);
+        // Root scores: one per legal move, the mating move scored as a mate.
+        List<Search.RootScore> scores = s.scoreRootMoves(mate, 2, null, new AtomicBoolean(false));
+        check("skill: scoreRootMoves covers every legal move",
+                scores != null && scores.size() == new MoveGenerator().generateLegal(mate).size()
+                && scores.stream().anyMatch(rs -> rs.move().toString().equals("a1a8") && rs.score() > Search.MATE_THRESHOLD));
+        // Save files from before the level setting map their depth to a level.
+        game.SavedGame legacy = game.SavedGame.parse("chess-save 1\nmode HUMAN_VS_AI\nhuman WHITE\nminutes 0\ndepth 4\nused 0 0\nmoves e2e4\n");
+        check("save: legacy depth line maps to a level", legacy.config().aiLevel() == 6);
     }
 
     private static void openingBook() {

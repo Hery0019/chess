@@ -334,14 +334,14 @@ public final class UiTests {
                 && emitted.get(0).mode() == GameConfig.Mode.HUMAN_VS_AI
                 && emitted.get(0).humanColor() == Pieces.WHITE
                 && emitted.get(0).minutesPerSide() == GameConfig.NO_CLOCK
-                && emitted.get(0).aiDepth() == 4
+                && emitted.get(0).aiLevel() == engine.Skill.DEFAULT
                 && emitted.get(0).undoLimit() == GameConfig.DEFAULT_UNDO_LIMIT);
 
         // Change every option through the visible controls and start again.
         AbstractButton aiVsAi = findButton(s, "AI vs AI");
         AbstractButton black = findButton(s, "Black");
         AbstractButton fiveMin = findButton(s, "5");
-        AbstractButton depth2 = findButton(s, "2");
+        AbstractButton depth2 = findButton(s, "700");    // strength pills are labelled with their Elo
         check("start: option buttons exist", aiVsAi != null && black != null && fiveMin != null && depth2 != null);
         if (aiVsAi == null || black == null || fiveMin == null || depth2 == null) return;
         aiVsAi.doClick();
@@ -355,7 +355,7 @@ public final class UiTests {
         GameConfig cfg = emitted.get(emitted.size() - 1);
         check("start: emits the chosen config",
                 cfg.mode() == GameConfig.Mode.HUMAN_VS_AI && cfg.humanColor() == Pieces.BLACK
-                && cfg.minutesPerSide() == 5 && cfg.aiDepth() == 2);
+                && cfg.minutesPerSide() == 5 && cfg.aiLevel() == 2);
 
         // Undo: Off greys out the limit pills and emits NO_UNDO; On + a pill emits that limit.
         // Time and depth also have numeric pills, so the takeback "10" is the last one in the tree.
@@ -394,7 +394,7 @@ public final class UiTests {
         s3.setSize(640, 760);
         layoutTree(s3);
         findButton(s3, "Online 1 v 1").doClick();
-        AbstractButton depth3 = findButton(s3, "6");
+        AbstractButton depth3 = findButton(s3, "1500");
         check("online: side and strength disabled", !findButton(s3, "Black").isEnabled() && depth3 != null && !depth3.isEnabled());
         List<javax.swing.JTextField> fields = new ArrayList<>();
         collect(s3, javax.swing.JTextField.class, fields);

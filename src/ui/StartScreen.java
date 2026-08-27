@@ -1,6 +1,7 @@
 package ui;
 
 import engine.Pieces;
+import engine.Skill;
 import game.GameConfig;
 import game.SavedGame;
 
@@ -98,23 +99,14 @@ public final class StartScreen extends JPanel {
     /** Takeback allowances offered when Undo is on. */
     private static final List<Integer> UNDO_LIMITS = List.of(1, 2, 3, 5, 10);
 
-    /** Depths on offer; the search is selective enough that 8 and 10 stay playable. */
-    private static final List<Integer> DEPTHS = List.of(1, 2, 3, 4, 5, 6, 8, 10);
+    /** Pill label for a strength level: its approximate Elo. */
+    private static String levelLabel(Skill.Level l) { return String.valueOf(l.elo()); }
 
-    /** Indexed by depth. */
-    private static final String[] STRENGTH_HINTS = {
-            "",
-            "Depth 1 — beginner, instant moves",
-            "Depth 2 — casual, instant moves",
-            "Depth 3 — club player, instant moves",
-            "Depth 4 — strong, instant moves",
-            "Depth 5 — stronger, instant moves",
-            "Depth 6 — expert, well under a second per move",
-            "",
-            "Depth 8 — master, under a second per move",
-            "",
-            "Depth 10 — maximum, a few seconds per move",
-    };
+    private static String levelHint(Skill.Level l) {
+        String pace = l.number() == Skill.MAX ? "a few seconds per move"
+                    : l.number() == Skill.MAX - 1 ? "under a second per move" : "instant moves";
+        return "Level " + l.number() + " — " + l.name() + ", about " + l.elo() + " Elo, " + pace;
+    }
 
     /**
      * @param initial       settings to preselect (the last game's), or null for the defaults
@@ -145,10 +137,11 @@ public final class StartScreen extends JPanel {
         Segmented<TimeControl> time = new Segmented<>(times,
                 times.stream().map(TimeControl::label).toList(), null, 0);   // untimed by default
 
-        Segmented<Integer> depth = new Segmented<>(DEPTHS,
-                DEPTHS.stream().map(String::valueOf).toList(), null, DEPTHS.indexOf(4));
-        JLabel strengthHint = label(STRENGTH_HINTS[depth.value()], font(Font.PLAIN, 12f), MUTED);
-        depth.onChange(() -> strengthHint.setText(STRENGTH_HINTS[depth.value()]));
+        Segmented<Integer> depth = new Segmented<>(
+                Skill.LEVELS.stream().map(Skill.Level::number).toList(),
+                Skill.LEVELS.stream().map(StartScreen::levelLabel).toList(), null, Skill.DEFAULT - 1);
+        JLabel strengthHint = label(levelHint(Skill.level(depth.value())), font(Font.PLAIN, 12f), MUTED);
+        depth.onChange(() -> strengthHint.setText(levelHint(Skill.level(depth.value()))));
 
         // Takebacks: an on/off switch and, when on, how many the game allows.
         Segmented<Boolean> undo = new Segmented<>(List.of(Boolean.FALSE, Boolean.TRUE), List.of("Off", "On"), null, 1);
@@ -219,7 +212,7 @@ public final class StartScreen extends JPanel {
             mode.select(initial.mode());
             side.select(initial.humanColor());
             time.select(new TimeControl(initial.minutesPerSide()));
-            depth.select(initial.aiDepth());
+            depth.select(initial.aiLevel());
             undo.select(initial.undoLimit() != GameConfig.NO_UNDO);
             undoLimit.select(initial.undoLimit());   // a value not on offer keeps the default pill
         }
@@ -252,7 +245,7 @@ public final class StartScreen extends JPanel {
         card.add(time, c);
 
         c.insets = new Insets(14, 0, 0, 0);
-        card.add(caption("AI strength"), c);
+        card.add(caption("AI strength (Elo)"), c);
         c.insets = new Insets(6, 0, 0, 0);
         card.add(depth, c);
         c.insets = new Insets(6, 2, 0, 0);
