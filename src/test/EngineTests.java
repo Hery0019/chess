@@ -36,6 +36,7 @@ public final class EngineTests {
         sanNotation();
         pgnExport();
         undoRestoresEverything();
+        savedGameRoundTrip();
         promotionMovesPresent();
         timeoutAdjudication();
 
@@ -375,6 +376,35 @@ public final class EngineTests {
         while (rep.canUndo()) rep.undoLastMove();
         check("undo: back to the start position",
                 rep.board().zobristKey() == Board.startPosition().zobristKey() && rep.plyCount() == 0);
+    }
+
+    private static void savedGameRoundTrip() {
+        game.GameConfig cfg = new game.GameConfig(game.GameConfig.Mode.HUMAN_VS_AI, BLACK, 10, 3);
+        GameSession s = new GameSession();
+        for (String mv : new String[]{"e2e4", "e7e5", "g1f3", "b8c6", "f1b5"}) s.applyMove(findMove(s.legalMoves(), mv));
+        game.ChessClock clock = new game.ChessClock(cfg.millisPerSide());
+        clock.restoreUsed(4321, 1234);
+        game.SavedGame saved = game.SavedGame.of(cfg, s, clock);
+        String text = saved.serialize();
+        game.SavedGame back = game.SavedGame.parse(text);
+        check("save: serialise/parse round trip", back.equals(saved) && text.startsWith(game.SavedGame.HEADER));
+        check("save: moves and clocks preserved",
+                back.moves().equals(List.of("e2e4", "e7e5", "g1f3", "b8c6", "f1b5"))
+                && back.whiteUsedMillis() == 4321 && back.blackUsedMillis() == 1234
+                && back.config().humanColor() == BLACK && back.config().minutesPerSide() == 10);
+        // Replaying through a session reproduces the position.
+        GameSession replay = new GameSession();
+        for (String mv : back.moves()) replay.applyMove(findMove(replay.legalMoves(), mv));
+        check("save: replay reaches the same position", replay.board().zobristKey() == s.board().zobristKey());
+        // Windows line endings and blank lines are tolerated; garbage is not.
+        check("save: CRLF tolerated", game.SavedGame.parse(text.replace("\n", "\r\n") + "\r\n").equals(saved));
+        boolean rejected = false;
+        try { game.SavedGame.parse("hello"); } catch (IllegalArgumentException e) { rejected = true; }
+        boolean rejectedMove = false;
+        try { game.SavedGame.parse(text.replace("f1b5", "zz99")); } catch (IllegalArgumentException e) { rejectedMove = true; }
+        check("save: malformed files are rejected", rejected && rejectedMove);
+        check("save: empty move list allowed",
+                game.SavedGame.parse(new game.SavedGame(cfg, List.of(), 0, 0).serialize()).moves().isEmpty());
     }
 
     private static boolean replayable(GameSession s, String[] line, int from) {

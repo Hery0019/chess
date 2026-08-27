@@ -67,6 +67,13 @@ public final class ChessClock {
     /** Time this side has consumed so far. */
     public long elapsedMillis(int color) { return usedNanosLive(color) / 1_000_000L; }
 
+    /** Restores consumed time (resuming a saved game). Only while stopped. */
+    public void restoreUsed(long whiteMillis, long blackMillis) {
+        if (running != -1) throw new IllegalStateException("clock is running");
+        usedNanos[0] = whiteMillis * 1_000_000L;
+        usedNanos[1] = blackMillis * 1_000_000L;
+    }
+
     /** Time left, clamped at 0; {@link Long#MAX_VALUE} for an unlimited clock. */
     public long remainingMillis(int color) {
         if (isUnlimited()) return Long.MAX_VALUE;
