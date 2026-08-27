@@ -23,17 +23,32 @@ quiescence search. Java 21, zero external dependencies.
 
 ## Build & run
 
+```bash
+./build.sh          # Linux / macOS / Git Bash   (Windows PowerShell: .\build.ps1)
+java -jar chess.jar
 ```
+
+The scripts compile into `out/` with `-Xlint:all,-serial` and package an
+executable `chess.jar` (tests excluded). Without the scripts:
+
+```bash
 javac --release 21 -d out $(find src -name "*.java")
 java -cp out app.Main
 ```
 
 ## Tests (plain main-class runners — no JUnit, so a bare JDK builds everything)
 
-```
+```bash
+./test.sh           # or .\test.ps1 — runs the three runners below, headless
 java -cp out test.PerftTest      # engine acceptance gate: 11 standard perft positions
 java -cp out test.EngineTests    # 35 targeted rule / draw / search / zobrist tests
+java -cp out test.UiTests        # Swing views driven by synthetic mouse events
 ```
+
+`UiTests` needs no display: it dispatches `MouseEvent`s straight into
+`BoardPanel` (click-click, drag & drop, premoves, flipped geometry, painting)
+and clicks through `StartScreen` to check the emitted `GameConfig`.
+CI (`.github/workflows/ci.yml`) runs build + all runners on every push.
 
 `PerftTest` exercises the full generation + make/unmake pipeline against
 published node counts (12.5M nodes, exact match required). `EngineTests`
@@ -55,7 +70,7 @@ ui/       MainFrame, StartScreen, GamePanel, BoardPanel, PieceRenderer
           Swing only. Never mutates engine state directly — all moves flow
           through GameSession.
 app/      Main (EDT bootstrap)
-test/     PerftTest, EngineTests
+test/     PerftTest, EngineTests, UiTests
 ```
 
 ### Threading model

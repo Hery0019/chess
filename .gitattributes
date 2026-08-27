@@ -1,0 +1,11 @@
+# Normalise line endings: LF in the repository and in working copies on
+# every platform, except Windows-native scripts which want CRLF.
+* text=auto eol=lf
+*.java text eol=lf
+*.md text eol=lf
+*.yml text eol=lf
+*.sh text eol=lf
+*.ps1 text eol=crlf
+*.bat text eol=crlf
+*.png binary
+*.jar binary
