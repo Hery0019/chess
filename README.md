@@ -6,6 +6,18 @@ chess clocks (or an untimed game), and a negamax (minimax + alpha-beta) engine
 with iterative deepening, transposition table, quiescence search and a small
 opening book. Java 21, zero external dependencies.
 
+## Screenshots
+
+<p align="center">
+  <img src="docs/start.png" width="440" alt="Start screen: mode, side, time control and AI strength as segmented controls">
+  <img src="docs/game.png" width="440" alt="A game against the AI: board, clocks, move list in SAN and the controls">
+</p>
+<p align="center">
+  <img src="docs/start-online.png" width="440" alt="Start screen in Online 1 v 1 mode with name, server address and Host / Join buttons">
+  <img src="docs/board-annotations.png" width="216" alt="Right-click marks and arrows on the board">
+  <img src="docs/promotion.png" width="216" alt="The on-board promotion strip">
+</p>
+
 ## Playing
 
 - **Move by click-click or drag & drop.** Click a piece (legal destinations
