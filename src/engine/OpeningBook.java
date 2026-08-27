@@ -27,7 +27,7 @@ public final class OpeningBook {
         "e2e4 e7e5 g1f3 b8c6 f1b5 g8f6 e1g1 f6e4 d2d4 f8e7",          // Ruy Lopez, open Berlin
         "e2e4 e7e5 g1f3 b8c6 f1c4 f8c5 c2c3 g8f6 d2d3 d7d6",          // Giuoco Piano
         "e2e4 e7e5 g1f3 b8c6 f1c4 g8f6 d2d3 f8c5 c2c3 d7d6",          // Italian, Two Knights
-        "e2e4 e7e5 g1f3 g8f6 f3e5 d7d6 e5f3 f6e4 d2d4 d7d5",          // Petroff
+        "e2e4 e7e5 g1f3 g8f6 f3e5 d7d6 e5f3 f6e4 d2d4 d6d5",          // Petroff
         "e2e4 e7e5 g1f3 b8c6 d2d4 e5d4 f3d4 g8f6 d4c6 b7c6 e4e5 d8e7", // Scotch
         "e2e4 e7e5 d2d4 e5d4 g1f3 b8c6 f1c4",                         // Scotch Gambit
         "e2e4 e7e5 b1c3 g8f6 f2f4 d7d5",                              // Vienna
