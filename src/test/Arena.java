@@ -32,7 +32,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
  *                         [a=all] [b=baseline] [tt=16] [maxplies=300]
  * </pre>
  * A feature spec is {@code all}, {@code baseline}, or a comma list of
- * {@code pvs, nullmove, lmr, futility, aspiration, see, structure, mobility};
+ * {@code pvs, nullmove, lmr, futility, aspiration, see, structure, mobility, pesto};
  * a name prefixed with {@code -} removes it ({@code all,-mobility} measures
  * mobility alone). Games are adjudicated when both engines have agreed for
  * eight plies that one side is up more than a queen, and drawn at the ply
@@ -42,7 +42,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 public final class Arena {
 
     private static final String[] FEATURES =
-            {"pvs", "nullmove", "lmr", "futility", "aspiration", "see", "structure", "mobility"};
+            {"pvs", "nullmove", "lmr", "futility", "aspiration", "see", "structure", "mobility", "pesto"};
     /** Plies of each book line replayed before the engines take over. */
     private static final int OPENING_PLIES = 8;
     private static final int ADJUDICATE_SCORE = 900, ADJUDICATE_PLIES = 8;
@@ -195,13 +195,14 @@ public final class Arena {
             if (i < 0) throw new IllegalArgumentException("unknown feature " + p + "; known: " + String.join(", ", FEATURES));
             f[i] = on;
         }
-        return new Search.Options(f[0], f[1], f[2], f[3], f[4], f[5], f[6], f[7]);
+        return new Search.Options(f[0], f[1], f[2], f[3], f[4], f[5], f[6], f[7], f[8]);
     }
 
     static String describe(Search.Options o) {
         if (o.equals(Search.Options.ALL)) return "all";
         if (o.equals(Search.Options.BASELINE)) return "baseline";
-        boolean[] f = {o.pvs(), o.nullMove(), o.lmr(), o.futility(), o.aspiration(), o.see(), o.pawnStructure(), o.mobility()};
+        boolean[] f = {o.pvs(), o.nullMove(), o.lmr(), o.futility(), o.aspiration(), o.see(), o.pawnStructure(),
+                       o.mobility(), o.pesto()};
         List<String> on = new ArrayList<>();
         for (int i = 0; i < f.length; i++) if (f[i]) on.add(FEATURES[i]);
         return on.isEmpty() ? "baseline" : String.join(",", on);
