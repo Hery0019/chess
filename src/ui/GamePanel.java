@@ -94,6 +94,7 @@ public final class GamePanel extends JPanel {
     private int topColor;            // color shown at the top of the window
     private AiWorker activeWorker;
     private boolean paused = false;
+    private boolean disposed = false;
 
     public GamePanel(GameConfig config, Runnable onNewGame) {
         super(new BorderLayout(8, 8));
@@ -245,7 +246,9 @@ public final class GamePanel extends JPanel {
 
     /** Stops timers and abandons any in-flight search. Idempotent. */
     public void dispose() {
+        disposed = true;
         uiTimer.stop();
+        boardPanel.stopAnimation();
         if (activeWorker != null) {
             activeWorker.cancelFlag.set(true);
             activeWorker = null;
@@ -307,6 +310,7 @@ public final class GamePanel extends JPanel {
         }
         boolean wasOver = session.result().isOver();
         for (int i = 0; i < plies; i++) session.undoLastMove();
+        boardPanel.stopAnimation();
         boardPanel.cancelPremove();
         boardPanel.clearSelection();
         lastAiInfo = null;
@@ -321,14 +325,13 @@ public final class GamePanel extends JPanel {
         int stm = session.sideToMove();
         if (!config.isAi(stm)) {
             boardPanel.setInteractionEnabled(true);
-            // A premove entered while the AI was thinking is played at once
-            // if it is legal here; consumePremove() drops it otherwise. It
-            // goes through the same path as a clicked move, so the AI reply
-            // is kicked off by the nested afterMoveApplied().
-            Move premove = boardPanel.consumePremove();
-            if (premove != null) {
-                session.applyMove(premove);
-                afterMoveApplied();
+            // A premove entered while the AI was thinking is played once the
+            // AI's move has finished sliding, so both moves are visible.
+            if (boardPanel.hasPremove()) {
+                int delay = boardPanel.isAnimating() ? BoardPanel.ANIMATION_MS + 40 : 1;
+                Timer t = new Timer(delay, e -> playPremove());
+                t.setRepeats(false);
+                t.start();
             }
             return;
         }
@@ -339,6 +342,22 @@ public final class GamePanel extends JPanel {
                 config.aiDepth(), timeBudgetMillis(stm), minMillis);
         activeWorker.execute();
         refresh();
+    }
+
+    /**
+     * Plays the held premove if it is legal in the current position (the
+     * user may have moved or cancelled in the meantime — then nothing
+     * happens). Goes through the same path as a clicked move, so the AI
+     * reply is kicked off by afterMoveApplied().
+     */
+    private void playPremove() {
+        if (disposed || session.result().isOver() || paused) return;
+        if (!config.isHuman(session.sideToMove()) || activeWorker != null) return;
+        Move premove = boardPanel.consumePremove();
+        if (premove == null) return;
+        session.applyMove(premove);
+        boardPanel.animate(premove);
+        afterMoveApplied();
     }
 
     private long timeBudgetMillis(int color) {
@@ -520,6 +539,7 @@ public final class GamePanel extends JPanel {
                 if (r != null && r.bestMove() != null) {
                     lastAiInfo = describe(r, snapshot.sideToMove());
                     session.applyMove(r.bestMove());   // validates legality as a backstop
+                    boardPanel.animate(r.bestMove());
                     afterMoveApplied();
                 }
             } catch (Exception ex) {
