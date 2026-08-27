@@ -17,7 +17,14 @@ import java.util.List;
  *   TIMEOUT      (my own flag fell)       OPPONENT_LEFT
  *   REMATCH                               ERROR &lt;text...&gt;
  *   PING                                  PONG
+ *   LEGAL        (my legal moves?)        LEGAL e2e4 e2e3 ...    (empty when it is not my turn)
+ *                                         RESULT 1-0|0-1|1/2-1/2 &lt;text...&gt;   (the game just ended)
  * </pre>
+ *
+ * LEGAL and RESULT exist for the browser client, which keeps no chess
+ * rules of its own; the Java client never asks and ignores RESULT (it
+ * adjudicates locally). The same lines travel as WebSocket text frames
+ * for browsers — see {@link ChessServer}.
  *
  * The server is authoritative: it keeps its own game per room, rejects a
  * move that is illegal or out of turn with ERROR, and only relays moves it
@@ -34,10 +41,10 @@ public final class Protocol {
     // client -> server
     public static final String HELLO = "HELLO", MOVE = "MOVE", RESIGN = "RESIGN",
             DRAW_OFFER = "DRAW_OFFER", DRAW_ACCEPT = "DRAW_ACCEPT", DRAW_DECLINE = "DRAW_DECLINE",
-            TIMEOUT = "TIMEOUT", REMATCH = "REMATCH", PING = "PING";
+            TIMEOUT = "TIMEOUT", REMATCH = "REMATCH", PING = "PING", LEGAL = "LEGAL";
     // server -> client
     public static final String WELCOME = "WELCOME", START = "START", OPPONENT_LEFT = "OPPONENT_LEFT",
-            ERROR = "ERROR", PONG = "PONG";
+            ERROR = "ERROR", PONG = "PONG", RESULT = "RESULT";
 
     private Protocol() {}
 

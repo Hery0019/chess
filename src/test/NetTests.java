@@ -33,6 +33,8 @@ public final class NetTests {
             server.start();
             pairingAndPlay(server.port());
             panelsPlayOverLoopback(server.port());
+            browserGetsThePage(server.port());
+            browserPlaysOverWebSocket(server.port());
             waitingClientSeesShutdown(server);
         }
         if (failures > 0) {
@@ -103,6 +105,9 @@ public final class NetTests {
         check("net: draw offer relayed (other way)", typeOf(ra.next()).equals(DRAW_OFFER));
         a.acceptDraw();
         check("net: draw acceptance relayed", typeOf(rb.next()).equals(DRAW_ACCEPT));
+        Message da = ra.next(), db = rb.next();
+        check("net: RESULT 1/2-1/2 announced to both after the agreed draw",
+                typeOf(da).equals(RESULT) && typeOf(db).equals(RESULT) && "1/2-1/2".equals(da.arg(0)) && db.line().contains("agreement"));
         a.send(Message.of(MOVE, "g1f3"));
         err = ra.next();
         check("net: no moves after the game ended", err != null && err.type().equals(ERROR) && err.line().contains("over"));
@@ -124,6 +129,8 @@ public final class NetTests {
         check("net: new white's move relayed", mv != null && mv.type().equals(MOVE) && mv.arg(0).equals("d2d4"));
         b.resign();
         check("net: resignation relayed", typeOf(ra.next()).equals(RESIGN));
+        Message qa = ra.next(), qb = rb.next();
+        check("net: RESULT 0-1 after White resigned", typeOf(qa).equals(RESULT) && "0-1".equals(qa.arg(0)) && typeOf(qb).equals(RESULT));
 
         // Timeout report relayed after another rematch.
         a.requestRematch();
@@ -135,6 +142,9 @@ public final class NetTests {
                 typeOf(s3a).equals(START) && s3a.arg(0).equals("WHITE") && typeOf(s3b).equals(START) && s3b.arg(0).equals("BLACK"));
         a.reportTimeout();
         check("net: flag fall relayed", typeOf(rb.next()).equals(TIMEOUT));
+        Message ta = ra.next(), tb = rb.next();
+        check("net: RESULT after the flag fall (White lost on time)",
+                typeOf(ta).equals(RESULT) && "0-1".equals(ta.arg(0)) && typeOf(tb).equals(RESULT) && tb.line().contains("time"));
 
         // Alice leaves: Bob is told, and can no longer play.
         a.close();
@@ -278,6 +288,162 @@ public final class NetTests {
             Thread.sleep(20);
         }
         return false;
+    }
+
+    // ---- the browser client: HTTP page and WebSocket on the same port ----
+
+    private static void browserGetsThePage(int port) throws Exception {
+        String ok = http(port, "GET / HTTP/1.1\r\nHost: test\r\n\r\n");
+        check("web: GET / serves the browser client",
+                ok.startsWith("HTTP/1.1 200 ") && ok.contains("text/html") && ok.contains("<title>Chess"));
+        String missing = http(port, "GET /nope HTTP/1.1\r\nHost: test\r\n\r\n");
+        check("web: unknown path is 404", missing.startsWith("HTTP/1.1 404 "));
+        String badUpgrade = http(port, "GET /ws HTTP/1.1\r\nHost: test\r\n\r\n");
+        check("web: /ws without an upgrade is 400", badUpgrade.startsWith("HTTP/1.1 400 "));
+    }
+
+    private static String http(int port, String request) throws Exception {
+        try (java.net.Socket s = new java.net.Socket("127.0.0.1", port)) {
+            s.setSoTimeout(5_000);
+            s.getOutputStream().write(request.getBytes(java.nio.charset.StandardCharsets.ISO_8859_1));
+            s.getOutputStream().flush();
+            return new String(s.getInputStream().readAllBytes(), java.nio.charset.StandardCharsets.UTF_8);
+        }
+    }
+
+    /** A Java client (Alice) hosts, a browser-style WebSocket client (Bob) joins; fool's mate, then Bob leaves. */
+    private static void browserPlaysOverWebSocket(int port) throws Exception {
+        Recorder ra = new Recorder();
+        ChessClient alice = ChessClient.connect("127.0.0.1", port, "Alice", 0, 2_000);
+        listen(alice, ra);
+        check("web: java client waits", typeOf(ra.next()).equals(WELCOME));
+
+        try (WsClient bob = new WsClient(port)) {
+            check("web: websocket handshake accepted", bob.handshakeOk);
+            bob.send("HELLO 1 0 Bob");
+            check("web: browser is welcomed and paired as Black",
+                    "WELCOME".equals(bob.next()) && "START BLACK 0 Alice Bob".equals(bob.next()));
+            Message start = ra.next();
+            check("web: java client starts as White", typeOf(start).equals(START) && "WHITE".equals(start.arg(0)));
+
+            bob.send("LEGAL");
+            check("web: no legal moves while it is not my turn", "LEGAL".equals(bob.next()));
+            bob.send("PING");
+            check("web: ping answered over websocket", "PONG".equals(bob.next()));
+
+            alice.send(Message.of(MOVE, "f2f3"));
+            check("web: white's move reaches the browser", "MOVE f2f3".equals(bob.next()));
+            bob.send("LEGAL");
+            String legal = bob.next();
+            check("web: legal moves listed for the browser (20 after 1.f3)",
+                    legal != null && legal.startsWith("LEGAL ") && legal.split(" ").length == 21 && legal.contains(" e7e5"));
+            bob.send("MOVE e7e6x");
+            check("web: illegal move refused", String.valueOf(bob.next()).startsWith("ERROR illegal move"));
+            bob.send("MOVE e7e5");
+            Message m = ra.next();
+            check("web: browser's move relayed to the java client", typeOf(m).equals(MOVE) && "e7e5".equals(m.arg(0)));
+            alice.send(Message.of(MOVE, "g2g4"));
+            check("web: 2.g4 arrives", "MOVE g2g4".equals(bob.next()));
+            bob.send("MOVE d8h4");
+            Message mate = ra.next();
+            Message result = ra.next();
+            check("web: mating move relayed, then RESULT to the java client",
+                    typeOf(mate).equals(MOVE) && "d8h4".equals(mate.arg(0))
+                    && typeOf(result).equals(RESULT) && "0-1".equals(result.arg(0)));
+            String bobResult = bob.next();
+            check("web: RESULT announces checkmate to the browser",
+                    bobResult != null && bobResult.startsWith("RESULT 0-1 Checkmate"));
+            bob.send("MOVE a7a6");
+            check("web: moves after the end are refused", "ERROR game over".equals(bob.next()));
+        }
+        check("web: browser closing the socket = opponent left", typeOf(ra.next()).equals(OPPONENT_LEFT));
+        alice.close();
+    }
+
+    /** The bare minimum of a browser: HTTP upgrade by hand, masked text frames out, plain frames in. */
+    private static final class WsClient implements AutoCloseable {
+        final java.net.Socket socket;
+        final java.io.InputStream in;
+        final java.io.OutputStream out;
+        final BlockingQueue<String> messages = new LinkedBlockingQueue<>();
+        final boolean handshakeOk;
+
+        WsClient(int port) throws Exception {
+            socket = new java.net.Socket("127.0.0.1", port);
+            socket.setSoTimeout(10_000);
+            in = new java.io.BufferedInputStream(socket.getInputStream());
+            out = socket.getOutputStream();
+            String key = java.util.Base64.getEncoder().encodeToString("0123456789abcdef".getBytes(java.nio.charset.StandardCharsets.US_ASCII));
+            out.write(("GET /ws HTTP/1.1\r\nHost: test\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n"
+                    + "Sec-WebSocket-Key: " + key + "\r\nSec-WebSocket-Version: 13\r\n\r\n").getBytes(java.nio.charset.StandardCharsets.ISO_8859_1));
+            out.flush();
+            String status = readLine();
+            String accept = null, line;
+            while ((line = readLine()) != null && !line.isEmpty()) {
+                if (line.toLowerCase().startsWith("sec-websocket-accept:")) accept = line.substring(line.indexOf(':') + 1).trim();
+            }
+            java.security.MessageDigest sha1 = java.security.MessageDigest.getInstance("SHA-1");
+            String expected = java.util.Base64.getEncoder().encodeToString(
+                    sha1.digest((key + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11").getBytes(java.nio.charset.StandardCharsets.US_ASCII)));
+            handshakeOk = status != null && status.startsWith("HTTP/1.1 101") && expected.equals(accept);
+            Thread reader = new Thread(this::readLoop, "ws-test-reader");
+            reader.setDaemon(true);
+            reader.start();
+        }
+
+        private String readLine() throws java.io.IOException {
+            StringBuilder sb = new StringBuilder();
+            int b;
+            while ((b = in.read()) >= 0) {
+                if (b == '\n') break;
+                if (b != '\r') sb.append((char) b);
+            }
+            return b < 0 && sb.length() == 0 ? null : sb.toString();
+        }
+
+        /** Client frames must be masked (RFC 6455 5.1). */
+        void send(String text) throws java.io.IOException {
+            byte[] payload = text.getBytes(java.nio.charset.StandardCharsets.UTF_8);
+            byte[] mask = {0x12, 0x34, 0x56, 0x78};
+            java.io.ByteArrayOutputStream f = new java.io.ByteArrayOutputStream();
+            f.write(0x81);
+            if (payload.length < 126) f.write(0x80 | payload.length);
+            else { f.write(0x80 | 126); f.write(payload.length >>> 8); f.write(payload.length & 0xFF); }
+            f.write(mask);
+            for (int i = 0; i < payload.length; i++) f.write(payload[i] ^ mask[i & 3]);
+            synchronized (out) { out.write(f.toByteArray()); out.flush(); }
+        }
+
+        String next() throws InterruptedException { return messages.poll(TIMEOUT_MS, TimeUnit.MILLISECONDS); }
+
+        private void readLoop() {
+            try {
+                while (true) {
+                    int b0 = in.read(), b1 = in.read();
+                    if (b0 < 0 || b1 < 0) return;
+                    int opcode = b0 & 0x0F;
+                    long len = b1 & 0x7F;
+                    if (len == 126) len = ((long) in.read() << 8) | in.read();
+                    else if (len == 127) { len = 0; for (int i = 0; i < 8; i++) len = (len << 8) | in.read(); }
+                    byte[] payload = in.readNBytes((int) len);
+                    if (opcode == 0x1) messages.add(new String(payload, java.nio.charset.StandardCharsets.UTF_8));
+                    else if (opcode == 0x8) return;
+                }
+            } catch (java.io.IOException ignored) {
+                // closed
+            }
+        }
+
+        @Override public void close() throws java.io.IOException {
+            byte[] mask = {1, 2, 3, 4};
+            byte[] code = {0x03, (byte) 0xE8};
+            synchronized (out) {
+                out.write(new byte[]{(byte) 0x88, (byte) 0x82, mask[0], mask[1], mask[2], mask[3],
+                        (byte) (code[0] ^ mask[0]), (byte) (code[1] ^ mask[1])});
+                out.flush();
+            }
+            socket.close();
+        }
     }
 
     private static void waitingClientSeesShutdown(ChessServer server) throws Exception {

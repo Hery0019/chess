@@ -1,7 +1,8 @@
 # Chess — Java Swing, Minimax/Alpha-Beta AI
 
-A complete chess game: Human vs AI, AI vs AI and online 1 v 1 over Java
-sockets, full FIDE move rules, optional
+A complete chess game: Human vs AI, AI vs AI and online 1 v 1 — the other
+player in this app or simply in a browser (nothing to install) — full FIDE
+move rules, optional
 chess clocks (or an untimed game), and a negamax (minimax + alpha-beta) engine
 with iterative deepening, transposition table, quiescence search and a small
 opening book. Java 21, zero external dependencies.
@@ -99,14 +100,24 @@ was tuned until the measured figure landed on the label (last column;
 (it is the same engine at a similar depth), so those two are estimates of
 where a depth-7 / depth-10 engine of this kind lands against humans.
 
-## Online 1 v 1 (two PCs, Java sockets)
+## Online 1 v 1 (two PCs — the other player needs nothing installed)
 
 Pick **Online 1 v 1** on the start screen, type a name and a `host:port`.
 
 - **Host game** opens that port on your PC (an embedded server), shows the
-  addresses to share, and waits. The other player picks **Join game** with
-  your `ip:port`. Only the port matters for the host; the time control is
-  the host's (first arrival's).
+  addresses to share, and waits. Only the port matters for the host; the
+  time control is the host's (first arrival's).
+- **The other player opens the address in a browser** — for example
+  `http://192.168.1.24:5000` — on any PC, Mac, tablet or phone on the same
+  network. No Java, nothing to install: the page is served by your PC and
+  plays over a WebSocket (click or tap to move, legal targets shown,
+  promotion chooser, clocks, resign / draw / rematch). Or they run this
+  app and pick **Join game** with the same `ip:port`, without the
+  `http://`. Both kinds of client can face each other.
+- The browser client keeps no chess rules of its own: it asks the server
+  for its legal moves (`LEGAL`) and is told how the game ended (`RESULT`).
+  One port serves everything — the server looks at the first bytes of a
+  connection to tell a browser (`GET …`) from the app (`HELLO …`).
 - **Standalone server** — both players join the same machine, which can be
   a third one: `java -cp chess.jar app.ServerMain 5000`. It pairs clients
   two by two in arrival order, so several games can run at once.
@@ -119,8 +130,10 @@ Pick **Online 1 v 1** on the start screen, type a name and a `host:port`.
   for the player who dropped; losing your own connection aborts it.
 - Protocol: one text line per message (`HELLO`, `START`, `MOVE e2e4`,
   `RESIGN`, `DRAW_OFFER/ACCEPT/DECLINE`, `TIMEOUT`, `REMATCH`,
-  `OPPONENT_LEFT`, `ERROR`, `PING/PONG`) — see `net/Protocol.java`.
-  Player names are reduced to single safe tokens.
+  `OPPONENT_LEFT`, `ERROR`, `PING/PONG`, `LEGAL`, `RESULT`) — see
+  `net/Protocol.java`; the same lines travel as WebSocket text frames for
+  browsers (`net/WebSocket.java`, RFC 6455 by hand, no dependency). Player
+  names are reduced to single safe tokens.
 - Firewalls: the host must allow inbound TCP on the chosen port; across the
   Internet the host's router needs a port forward. Names travel in clear —
   there is no encryption or authentication (LAN / friends use).
@@ -163,7 +176,7 @@ time plus half the increment per move.
 java -cp out test.PerftTest      # engine acceptance gate: 11 standard perft positions
 java -cp out test.EngineTests    # 83 targeted rule / draw / search / SEE / notation / session tests
 java -cp out test.UiTests        # 66 checks: Swing views driven by synthetic mouse events
-java -cp out test.NetTests       # server + two clients over loopback: pairing, relay, rematch, disconnects
+java -cp out test.NetTests       # server + two clients over loopback: pairing, relay, rematch, disconnects, browser client (HTTP + WebSocket)
 java -cp out test.UciTests       # drives app.Uci through a pipe: handshake, searches, stop, book
 java -cp out test.Arena [games=40] [movetime=100|depth=4] [a=all] [b=baseline]   # engine vs engine, Elo report (minutes)
 java -cp out test.Calibrate [levels=1-6] [games=8] [depth=8]                     # ACPL of each strength level -> Elo (minutes)

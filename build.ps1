@@ -23,7 +23,11 @@ $sources = Get-ChildItem -Recurse -Filter *.java src | ForEach-Object { $_.FullN
 & javac --release 21 -Xlint:all,-serial -d out $sources
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
+# The browser client is a resource: copy it next to the classes so both `-cp out` and the jar find it.
+New-Item -ItemType Directory out\web | Out-Null
+Copy-Item src\web\* out\web\
+
 Set-Content -Path out\MANIFEST.MF -Value "Main-Class: app.Main" -Encoding ascii
-& $jar --create --file chess.jar --manifest out\MANIFEST.MF -C out app -C out engine -C out game -C out net -C out ui
+& $jar --create --file chess.jar --manifest out\MANIFEST.MF -C out app -C out engine -C out game -C out net -C out ui -C out web
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 Write-Host "Built chess.jar  (run: java -jar chess.jar)"

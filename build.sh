@@ -21,7 +21,11 @@ mkdir -p out
 # -serial: Swing subclasses never get serialised; the warning is pure noise.
 javac --release 21 -Xlint:all,-serial -d out $(find src -name "*.java")
 
+# The browser client is a resource: copy it next to the classes so both `-cp out` and the jar find it.
+mkdir -p out/web
+cp src/web/* out/web/
+
 printf 'Main-Class: app.Main\n' > out/MANIFEST.MF
 "$JAR" --create --file chess.jar --manifest out/MANIFEST.MF \
-    -C out app -C out engine -C out game -C out net -C out ui
+    -C out app -C out engine -C out game -C out net -C out ui -C out web
 echo "Built chess.jar  (run: java -jar chess.jar)"
