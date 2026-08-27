@@ -28,6 +28,10 @@ public final class EngineTests {
         insufficientMaterial();
         searchFindsMate();
         searchPrefersFasterMate();
+        searchSeesRepetitionAsDraw();
+        searchAvoidsRepetitionWhenWinning();
+        searchIterativeDeepening();
+        searchReusesTableAcrossCalls();
         promotionMovesPresent();
         timeoutAdjudication();
 
@@ -202,6 +206,64 @@ public final class EngineTests {
         // Mate in 2 => score == MATE - 3 plies (w, b, w).
         check("search: mate score is ply-adjusted (prefers fastest mate)",
                 r != null && r.score() == Search.MATE_SCORE - 3);
+    }
+
+    private static void searchSeesRepetitionAsDraw() {
+        // White (Kh3, Qf8) is a queen and two rooks down but has a forced
+        // perpetual: 1.Qf7+ Kh8 2.Qf8+ Kh7 repeats the root. Black's pieces
+        // are boxed in behind its own b2 pawn and cannot interpose or capture.
+        // With repetition detection the root scores exactly 0 and the engine
+        // chooses the perpetual; without it the line scores ~-1300.
+        Board b = Board.fromFen("5Q2/7k/6pp/8/8/7K/rp6/qr6 w - - 0 1");
+        Search.Result r = new Search().findBest(b, 5, new AtomicBoolean(false));
+        check("search: forced perpetual scores as a draw",
+                r != null && r.score() == Search.DRAW_SCORE && r.bestMove().toString().equals("f8f7"));
+    }
+
+    private static void searchAvoidsRepetitionWhenWinning() {
+        // KQ vs K, White to move and winning. First ask for the natural best
+        // move; then tell the search that the position it leads to has
+        // already occurred twice in the game (halfmove clock high enough for
+        // those plies to count). Playing it again would be a threefold draw,
+        // so the engine must switch to another move that is still winning.
+        Board b = Board.fromFen("1k6/8/8/3Q4/8/8/8/6K1 w - - 10 30");
+        Search.Result first = new Search().findBest(b, 4, new AtomicBoolean(false));
+        Board after = b.copy();
+        after.makeMove(first.bestMove(), new Undo());
+        long[] prior = {after.zobristKey(), after.zobristKey()};
+        Search.Result second = new Search().findBest(b, 4, 0, prior, new AtomicBoolean(false));
+        check("search: winning side avoids the repeating move",
+                first != null && second != null
+                && !second.bestMove().equals(first.bestMove()) && second.score() > 500);
+    }
+
+    private static void searchIterativeDeepening() {
+        Board b = Board.startPosition();
+        Search.Result fixed = new Search().findBest(b, 3, new AtomicBoolean(false));
+        check("search: fixed depth reports its depth and a PV",
+                fixed != null && fixed.depth() == 3 && fixed.pv().size() >= 1
+                && fixed.pv().get(0).equals(fixed.bestMove()));
+
+        long t0 = System.nanoTime();
+        Search.Result timed = new Search().findBest(b, 12, 150, null, new AtomicBoolean(false));
+        long ms = (System.nanoTime() - t0) / 1_000_000L;
+        check("search: time budget returns a completed iteration quickly",
+                timed != null && timed.bestMove() != null && timed.depth() >= 1 && timed.depth() < 12 && ms < 2_000);
+
+        AtomicBoolean cancelled = new AtomicBoolean(true);
+        check("search: cancelled search returns null",
+                new Search().findBest(b, 6, 0, null, cancelled) == null);
+    }
+
+    private static void searchReusesTableAcrossCalls() {
+        // Same instance, same position twice: the table must not corrupt the answer.
+        Search s = new Search();
+        Board b = Board.fromFen("k7/8/8/8/8/8/5KR1/7R w - - 0 1");
+        Search.Result r1 = s.findBest(b, 5, new AtomicBoolean(false));
+        Search.Result r2 = s.findBest(b, 5, new AtomicBoolean(false));
+        check("search: table reuse keeps the mate-in-2 answer",
+                r1 != null && r2 != null && r1.score() == Search.MATE_SCORE - 3
+                && r2.score() == Search.MATE_SCORE - 3 && r2.bestMove().equals(r1.bestMove()));
     }
 
     private static void promotionMovesPresent() {

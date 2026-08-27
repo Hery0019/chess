@@ -35,6 +35,8 @@ public final class GameSession {
     private final List<Move> history = new ArrayList<>();
     /** zobrist key -> occurrence count, including the initial position. */
     private final Map<Long, Integer> repetitions = new HashMap<>();
+    /** Key of every position so far, oldest first, including the current one. */
+    private final List<Long> keyHistory = new ArrayList<>();
     private GameResult result = GameResult.ONGOING;
     private List<Move> cachedLegal;   // invalidated on every applyMove
 
@@ -44,6 +46,7 @@ public final class GameSession {
     public GameSession(Board initial) {
         this.board = initial;
         repetitions.put(board.zobristKey(), 1);
+        keyHistory.add(board.zobristKey());
         adjudicate();   // the initial position may already be terminal
     }
 
@@ -52,6 +55,16 @@ public final class GameSession {
     public List<Move> history()     { return List.copyOf(history); }
     public int sideToMove()         { return board.sideToMove(); }
     public Move lastMove()          { return history.isEmpty() ? null : history.get(history.size() - 1); }
+
+    /**
+     * Zobrist keys of every position BEFORE the current one, oldest first —
+     * what the search needs to detect repetitions against the game so far.
+     */
+    public long[] priorPositionKeys() {
+        long[] keys = new long[keyHistory.size() - 1];
+        for (int i = 0; i < keys.length; i++) keys[i] = keyHistory.get(i);
+        return keys;
+    }
 
     /** Legal moves in the current position (cached until the next applyMove). */
     public List<Move> legalMoves() {
@@ -78,6 +91,7 @@ public final class GameSession {
         history.add(m);
         cachedLegal = null;
         repetitions.merge(board.zobristKey(), 1, Integer::sum);
+        keyHistory.add(board.zobristKey());
         adjudicate();
     }
 
