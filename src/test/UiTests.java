@@ -37,6 +37,7 @@ public final class UiTests {
                 boardInteraction();
                 boardPremoves();
                 boardFlippedGeometry();
+                boardPromotionStrip();
                 boardPaintsInEveryState();
                 startScreenEmitsConfig();
             } catch (Exception e) {
@@ -190,6 +191,42 @@ public final class UiTests {
         drag(p, px(e7) + 10, py(e7) + 10);
         release(p, px(e5), py(e5));
         check("board: flipped drag e7->e5", submitted(received, "e7e5"));
+    }
+
+    // ---- BoardPanel: on-board promotion strip ----
+
+    private static void boardPromotionStrip() {
+        // White pawn on a7; the strip for a8 runs downwards: Q on a8, N on a7, R on a6, B on a5.
+        GameSession session = new GameSession(engine.Board.fromFen("8/P7/8/8/8/8/8/k6K w - - 0 1"));
+        List<Move> received = new ArrayList<>();
+        BoardPanel p = newBoard(session, false, Pieces.WHITE, received);
+        p.setInteractionEnabled(true);
+
+        click(p, sq("a7"));
+        click(p, sq("a8"));
+        check("promotion: strip opens instead of submitting", received.isEmpty() && p.isChoosingPromotion());
+        click(p, sq("a7"));   // second cell = knight
+        check("promotion: clicking the knight cell submits a7a8n", submitted(received, "a7a8n") && !p.isChoosingPromotion());
+        received.clear();
+
+        click(p, sq("a7"));
+        click(p, sq("a8"));
+        click(p, sq("e4"));   // outside the strip: cancel
+        check("promotion: clicking elsewhere cancels", received.isEmpty() && !p.isChoosingPromotion());
+        click(p, sq("a8"));   // selection was cleared too: nothing happens
+        check("promotion: cancel also clears the selection", received.isEmpty() && !p.isChoosingPromotion());
+
+        dragTo(p, sq("a7"), sq("a8"));
+        check("promotion: drop opens the strip", received.isEmpty() && p.isChoosingPromotion());
+        click(p, sq("a6"));   // third cell = rook
+        check("promotion: rook via drag then click", submitted(received, "a7a8r"));
+        received.clear();
+
+        // Paint with the strip open must not throw.
+        click(p, sq("a7"));
+        click(p, sq("a8"));
+        p.paint(new BufferedImage(400, 400, BufferedImage.TYPE_INT_RGB).getGraphics());
+        check("promotion: strip paints", p.isChoosingPromotion());
     }
 
     // ---- BoardPanel: painting never throws ----
