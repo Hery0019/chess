@@ -98,6 +98,12 @@ public final class GamePanel extends JPanel {
     private final JLabel statusLabel = new JLabel();
     private final JButton pauseButton = new JButton("Pause");
     private final JButton undoButton = new JButton("Undo");
+    private final JButton resignButton = new JButton("Resign");
+    private final JButton drawButton = new JButton("Offer draw");
+    /** Score of the AI's last real search from its own point of view; null after a book move. */
+    private Integer lastAiScore;
+    private String notice;
+    private long noticeUntilMillis;
     private final MoveTableModel moveModel = new MoveTableModel();
     private final JTable moveTable = new JTable(moveModel);
     private final Timer uiTimer;
@@ -179,6 +185,7 @@ public final class GamePanel extends JPanel {
         title.setBorder(BorderFactory.createEmptyBorder(6, 2, 0, 0));
         JCheckBox sound = new JCheckBox("Sound", Sounds.isEnabled());
         sound.setFocusable(false);
+        sound.setOpaque(false);
         sound.addActionListener(e -> Sounds.setEnabled(sound.isSelected()));
         JPanel header = new JPanel(new BorderLayout());
         header.add(title, BorderLayout.WEST);
@@ -205,6 +212,11 @@ public final class GamePanel extends JPanel {
         undoButton.addActionListener(e -> undo());
         JButton flipBoard = new JButton("Flip Board");
         flipBoard.addActionListener(e -> flipBoard());
+        resignButton.setVisible(!aiVsAi);
+        resignButton.addActionListener(e -> resign());
+        drawButton.setVisible(!aiVsAi);
+        drawButton.setToolTipText("The AI accepts when its own evaluation is not better than equal");
+        drawButton.addActionListener(e -> offerDraw());
         JButton exportPgn = new JButton("Export PGN…");
         exportPgn.addActionListener(e -> exportPgn());
         JButton save = new JButton("Save…");
@@ -216,6 +228,10 @@ public final class GamePanel extends JPanel {
         JPanel buttons = new JPanel(new GridLayout(0, 2, 6, 6));
         buttons.add(aiVsAi ? pauseButton : undoButton);
         buttons.add(flipBoard);
+        if (!aiVsAi) {
+            buttons.add(resignButton);
+            buttons.add(drawButton);
+        }
         buttons.add(save);
         buttons.add(exportPgn);
         buttons.add(newGame);
@@ -278,6 +294,44 @@ public final class GamePanel extends JPanel {
             JOptionPane.showMessageDialog(this, "Could not write " + target + ":\n" + ex.getMessage(),
                     title, JOptionPane.ERROR_MESSAGE);
         }
+    }
+
+    private void resign() {
+        if (session.result().isOver() || config.mode() != GameConfig.Mode.HUMAN_VS_AI) return;
+        int answer = JOptionPane.showConfirmDialog(this, "Resign this game?", "Resign",
+                JOptionPane.YES_NO_OPTION, JOptionPane.QUESTION_MESSAGE);
+        if (answer != JOptionPane.YES_OPTION || session.result().isOver()) return;
+        if (activeWorker != null) {
+            activeWorker.cancelFlag.set(true);
+            activeWorker = null;
+        }
+        session.resign(config.humanColor());
+        Sounds.play(Sounds.Kind.GAME_END);
+        endGame();
+        refresh();
+    }
+
+    /**
+     * The AI accepts a draw when its last search did not rate its own
+     * position as better than roughly equal (+0.30) and the game has left
+     * the opening; otherwise the offer is declined in the status line.
+     */
+    private void offerDraw() {
+        if (session.result().isOver() || !config.isHuman(session.sideToMove()) || activeWorker != null) return;
+        boolean accepts = lastAiScore != null && lastAiScore <= 30 && session.plyCount() >= 20;
+        if (accepts) {
+            session.agreeDraw();
+            Sounds.play(Sounds.Kind.GAME_END);
+            endGame();
+        } else {
+            notice("Draw offer declined", 3000);
+        }
+        refresh();
+    }
+
+    private void notice(String text, long millis) {
+        notice = text;
+        noticeUntilMillis = System.currentTimeMillis() + millis;
     }
 
     /** Shown once per game end (after the last slide): rematch, new game, or stay and review. */
@@ -518,8 +572,15 @@ public final class GamePanel extends JPanel {
             status = session.statusText();
             if (lastAiInfo != null) status += "   ·   AI " + lastAiInfo;
         }
+        if (notice != null) {
+            if (System.currentTimeMillis() < noticeUntilMillis) status += "   ·   " + notice;
+            else notice = null;
+        }
         statusLabel.setText("   " + status);
         undoButton.setEnabled(undoPlies() > 0);
+        boolean humanTurn = !session.result().isOver() && config.isHuman(session.sideToMove()) && activeWorker == null;
+        resignButton.setEnabled(!session.result().isOver());
+        drawButton.setEnabled(humanTurn);
         syncMoveList();
         boardPanel.repaint();
     }
@@ -620,6 +681,7 @@ public final class GamePanel extends JPanel {
                 Search.Result r = get();
                 if (r != null && r.bestMove() != null) {
                     lastAiInfo = describe(r, snapshot.sideToMove());
+                    lastAiScore = r.depth() > 0 ? r.score() : null;
                     session.applyMove(r.bestMove());   // validates legality as a backstop
                     boardPanel.animate(r.bestMove());
                     afterMoveApplied();

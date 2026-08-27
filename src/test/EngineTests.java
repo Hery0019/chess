@@ -37,6 +37,7 @@ public final class EngineTests {
         pgnExport();
         undoRestoresEverything();
         savedGameRoundTrip();
+        resignationAndAgreedDraw();
         promotionMovesPresent();
         timeoutAdjudication();
 
@@ -405,6 +406,27 @@ public final class EngineTests {
         check("save: malformed files are rejected", rejected && rejectedMove);
         check("save: empty move list allowed",
                 game.SavedGame.parse(new game.SavedGame(cfg, List.of(), 0, 0).serialize()).moves().isEmpty());
+    }
+
+    private static void resignationAndAgreedDraw() {
+        GameSession s = new GameSession();
+        s.applyMove(findMove(s.legalMoves(), "e2e4"));
+        s.resign(BLACK);
+        check("resign: black resigns, white wins",
+                s.result() == GameResult.WHITE_WINS_RESIGNATION && s.result().pgnToken().equals("1-0"));
+        s.agreeDraw();
+        check("resign: result is final", s.result() == GameResult.WHITE_WINS_RESIGNATION);
+        boolean refused = false;
+        try { s.applyMove(findMove(s.legalMoves(), "e7e5")); } catch (IllegalStateException e) { refused = true; }
+        check("resign: no moves after the game ended", refused);
+        s.undoLastMove();
+        check("resign: takeback reopens the game", s.result() == GameResult.ONGOING);
+
+        GameSession d = new GameSession();
+        d.agreeDraw();
+        check("draw: agreed draw", d.result() == GameResult.DRAW_AGREED && d.result().pgnToken().equals("1/2-1/2"));
+        d.resign(WHITE);
+        check("draw: agreed draw is final", d.result() == GameResult.DRAW_AGREED);
     }
 
     private static boolean replayable(GameSession s, String[] line, int from) {

@@ -23,13 +23,18 @@ public final class Sounds {
 
     private static final float SAMPLE_RATE = 22_050f;
     private static final Map<Kind, Clip> CLIPS = new EnumMap<>(Kind.class);
-    private static volatile boolean enabled = true;
+    private static volatile boolean enabled = Prefs.soundEnabled();
     private static boolean initialised = false;
 
     private Sounds() {}
 
     public static boolean isEnabled() { return enabled; }
-    public static void setEnabled(boolean on) { enabled = on; }
+
+    /** Switches sounds on or off and remembers the choice. */
+    public static void setEnabled(boolean on) {
+        enabled = on;
+        Prefs.setSoundEnabled(on);
+    }
 
     /** Plays a sound if audio is available and sounds are enabled. Never throws. */
     public static void play(Kind kind) {

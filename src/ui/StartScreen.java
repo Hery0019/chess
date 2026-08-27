@@ -98,10 +98,11 @@ public final class StartScreen extends JPanel {
     };
 
     /**
+     * @param initial  settings to preselect (the last game's), or null for the defaults
      * @param onStart  receives the configuration when Start is pressed
      * @param onResume receives a parsed save file chosen via "Resume a saved game…"
      */
-    public StartScreen(Consumer<GameConfig> onStart, Consumer<SavedGame> onResume) {
+    public StartScreen(GameConfig initial, Consumer<GameConfig> onStart, Consumer<SavedGame> onResume) {
         super(new GridBagLayout());
         setOpaque(true);
 
@@ -129,6 +130,14 @@ public final class StartScreen extends JPanel {
         // Side choice is meaningless in AI-vs-AI: disabled, not hidden, so the
         // layout stays stable and the causality is visible to the user.
         mode.onChange(() -> side.setEnabled(mode.value() == GameConfig.Mode.HUMAN_VS_AI));
+
+        if (initial != null) {
+            mode.select(initial.mode());
+            side.select(initial.humanColor());
+            time.select(new TimeControl(initial.minutesPerSide()));
+            depth.select(initial.aiDepth());
+            side.setEnabled(mode.value() == GameConfig.Mode.HUMAN_VS_AI);
+        }
 
         PrimaryButton start = new PrimaryButton("Start Game");
         start.addActionListener(e -> onStart.accept(new GameConfig(
@@ -360,6 +369,12 @@ public final class StartScreen extends JPanel {
         }
 
         void onChange(Runnable r) { listeners.add(r); }
+
+        /** Selects the pill holding {@code value}; unknown values are ignored. */
+        void select(T value) {
+            int i = values.indexOf(value);
+            if (i >= 0) pills.get(i).setSelected(true);
+        }
 
         @Override
         public void setEnabled(boolean enabled) {

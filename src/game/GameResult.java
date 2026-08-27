@@ -7,6 +7,9 @@ public enum GameResult {
     BLACK_WINS_MATE("Checkmate — Black wins"),
     WHITE_WINS_TIMEOUT("Black lost on time — White wins"),
     BLACK_WINS_TIMEOUT("White lost on time — Black wins"),
+    WHITE_WINS_RESIGNATION("Black resigned — White wins"),
+    BLACK_WINS_RESIGNATION("White resigned — Black wins"),
+    DRAW_AGREED("Draw — by agreement"),
     DRAW_STALEMATE("Draw — stalemate"),
     DRAW_REPETITION("Draw — threefold repetition"),
     DRAW_FIFTY_MOVES("Draw — fifty-move rule"),
@@ -22,8 +25,8 @@ public enum GameResult {
     public String pgnToken() {
         return switch (this) {
             case ONGOING -> "*";
-            case WHITE_WINS_MATE, WHITE_WINS_TIMEOUT -> "1-0";
-            case BLACK_WINS_MATE, BLACK_WINS_TIMEOUT -> "0-1";
+            case WHITE_WINS_MATE, WHITE_WINS_TIMEOUT, WHITE_WINS_RESIGNATION -> "1-0";
+            case BLACK_WINS_MATE, BLACK_WINS_TIMEOUT, BLACK_WINS_RESIGNATION -> "0-1";
             default -> "1/2-1/2";
         };
     }

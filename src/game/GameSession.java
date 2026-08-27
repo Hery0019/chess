@@ -147,6 +147,18 @@ public final class GameSession {
         }
     }
 
+    /** {@code color} resigns; no effect once the game is over. */
+    public void resign(int color) {
+        if (result.isOver()) return;
+        result = color == WHITE ? GameResult.BLACK_WINS_RESIGNATION : GameResult.WHITE_WINS_RESIGNATION;
+    }
+
+    /** Both sides agree to a draw; no effect once the game is over. */
+    public void agreeDraw() {
+        if (result.isOver()) return;
+        result = GameResult.DRAW_AGREED;
+    }
+
     // ---- adjudication ----
 
     private void adjudicate() {
