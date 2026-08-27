@@ -131,6 +131,9 @@ public final class GamePanel extends JPanel {
     private boolean paused = false;
     private boolean disposed = false;
     private boolean endDialogShown = false;
+    /** Takebacks spent so far; the game allows {@code config.undoLimit()} of them. */
+    private int takebacksUsed;
+    private int shownTakebacksLeft = -1;   // allowance last rendered on the Undo button
 
     /** Local game (fresh or resumed). */
     public GamePanel(GameConfig config, SavedGame saved, Host host) {
@@ -163,6 +166,7 @@ public final class GamePanel extends JPanel {
                 session.applyMove(move);
             }
             clock.restoreUsed(saved.whiteUsedMillis(), saved.blackUsedMillis());
+            takebacksUsed = saved.undoUsed();
         }
 
         boolean flipped = config.isHuman(Pieces.BLACK);
@@ -237,11 +241,10 @@ public final class GamePanel extends JPanel {
         JScrollPane scroll = new JScrollPane(moveTable);
 
         boolean aiVsAi = config.mode() == GameConfig.Mode.AI_VS_AI;
-        boolean humanVsAi = config.mode() == GameConfig.Mode.HUMAN_VS_AI;
+        boolean canUndo = config.undoEnabled();   // Human vs AI with takebacks switched on
         pauseButton.setVisible(aiVsAi);
         pauseButton.addActionListener(e -> togglePause());
-        undoButton.setVisible(humanVsAi);
-        undoButton.setToolTipText("Take back your last move (Ctrl+Z)");
+        undoButton.setVisible(canUndo);
         undoButton.addActionListener(e -> undo());
         JButton flipBoard = new JButton("Flip Board");
         flipBoard.addActionListener(e -> flipBoard());
@@ -262,7 +265,7 @@ public final class GamePanel extends JPanel {
 
         JPanel buttons = new JPanel(new GridLayout(0, 2, 6, 6));
         if (aiVsAi) buttons.add(pauseButton);
-        if (humanVsAi) buttons.add(undoButton);
+        if (canUndo) buttons.add(undoButton);
         buttons.add(flipBoard);
         if (!aiVsAi) {
             buttons.add(resignButton);
@@ -322,7 +325,7 @@ public final class GamePanel extends JPanel {
     }
 
     private void saveGame() {
-        writeToChosenFile("Save game", "game.chess", SavedGame.of(config, session, clock).serialize());
+        writeToChosenFile("Save game", "game.chess", SavedGame.of(config, session, clock, takebacksUsed).serialize());
     }
 
     private void writeToChosenFile(String title, String defaultName, String content) {
@@ -414,7 +417,8 @@ public final class GamePanel extends JPanel {
     /** Same settings, colours swapped (Human vs AI). */
     private GameConfig rematchConfig() {
         if (config.mode() != GameConfig.Mode.HUMAN_VS_AI) return config;
-        return new GameConfig(config.mode(), config.humanColor() ^ 1, config.minutesPerSide(), config.aiDepth());
+        return new GameConfig(config.mode(), config.humanColor() ^ 1, config.minutesPerSide(), config.aiDepth(),
+                config.undoLimit());
     }
 
     /** Called once by MainFrame after the panel is shown. */
@@ -489,9 +493,14 @@ public final class GamePanel extends JPanel {
         }
     }
 
+    /** Takebacks still available in this game: 0 when Undo is off or the allowance is spent. */
+    private int takebacksLeft() {
+        return config.undoEnabled() ? Math.max(0, config.undoLimit() - takebacksUsed) : 0;
+    }
+
     /** Number of plies a takeback removes right now, 0 when nothing can be taken back. */
     private int undoPlies() {
-        if (config.mode() != GameConfig.Mode.HUMAN_VS_AI) return 0;
+        if (takebacksLeft() == 0) return 0;
         int n = session.plyCount();
         boolean humanToMove = session.sideToMove() == config.humanColor();
         if (humanToMove && !session.result().isOver()) {
@@ -508,11 +517,19 @@ public final class GamePanel extends JPanel {
      * Takeback (Human vs AI only). Cancels a search in progress, removes the
      * last human move together with the AI reply that followed it (if any),
      * and resumes the game from the restored position — including a game
-     * that had already ended.
+     * that had already ended. Every takeback counts against the allowance
+     * chosen on the start screen ({@link GameConfig#undoLimit()}).
      */
     private void undo() {
         int plies = undoPlies();
-        if (plies == 0) return;
+        if (plies == 0) {
+            if (config.undoEnabled() && takebacksLeft() == 0) {   // Ctrl+Z once the allowance is spent
+                notice("No takebacks left — this game allows " + config.undoLimit(), 4_000);
+                refresh();
+            }
+            return;
+        }
+        takebacksUsed++;
         cancelWorker();
         boolean wasOver = session.result().isOver();
         for (int i = 0; i < plies; i++) session.undoLastMove();
@@ -763,6 +780,13 @@ public final class GamePanel extends JPanel {
         }
         statusLabel.setText("   " + status);
         undoButton.setEnabled(undoPlies() > 0);
+        int left = takebacksLeft();
+        if (config.undoEnabled() && left != shownTakebacksLeft) {   // the label carries the remaining allowance
+            shownTakebacksLeft = left;
+            undoButton.setText("Undo (" + left + " left)");
+            undoButton.setToolTipText(left == 0 ? "No takebacks left in this game"
+                    : "Take back your last move (Ctrl+Z) — " + left + " of " + config.undoLimit() + " left");
+        }
         boolean over = session.result().isOver();
         boolean humanTurn = !over && config.isHuman(session.sideToMove()) && activeWorker == null;
         resignButton.setEnabled(!over && !onlineGone);

@@ -380,12 +380,19 @@ public final class EngineTests {
     }
 
     private static void savedGameRoundTrip() {
-        game.GameConfig cfg = new game.GameConfig(game.GameConfig.Mode.HUMAN_VS_AI, BLACK, 10, 3);
+        game.GameConfig cfg = new game.GameConfig(game.GameConfig.Mode.HUMAN_VS_AI, BLACK, 10, 3, 2);
+        boolean badLimit = false;
+        try { new game.GameConfig(game.GameConfig.Mode.HUMAN_VS_AI, BLACK, 10, 3, -1); }
+        catch (IllegalArgumentException e) { badLimit = true; }
+        check("config: undo limit validated, takebacks are Human vs AI only",
+                badLimit && cfg.undoEnabled()
+                && !new game.GameConfig(game.GameConfig.Mode.HUMAN_VS_AI, BLACK, 10, 3, game.GameConfig.NO_UNDO).undoEnabled()
+                && !new game.GameConfig(game.GameConfig.Mode.AI_VS_AI, BLACK, 10, 3, 5).undoEnabled());
         GameSession s = new GameSession();
         for (String mv : new String[]{"e2e4", "e7e5", "g1f3", "b8c6", "f1b5"}) s.applyMove(findMove(s.legalMoves(), mv));
         game.ChessClock clock = new game.ChessClock(cfg.millisPerSide());
         clock.restoreUsed(4321, 1234);
-        game.SavedGame saved = game.SavedGame.of(cfg, s, clock);
+        game.SavedGame saved = game.SavedGame.of(cfg, s, clock, 1);
         String text = saved.serialize();
         game.SavedGame back = game.SavedGame.parse(text);
         check("save: serialise/parse round trip", back.equals(saved) && text.startsWith(game.SavedGame.HEADER));
@@ -393,6 +400,18 @@ public final class EngineTests {
                 back.moves().equals(List.of("e2e4", "e7e5", "g1f3", "b8c6", "f1b5"))
                 && back.whiteUsedMillis() == 4321 && back.blackUsedMillis() == 1234
                 && back.config().humanColor() == BLACK && back.config().minutesPerSide() == 10);
+        check("save: undo limit and takebacks spent preserved",
+                back.config().undoLimit() == 2 && back.undoUsed() == 1
+                && text.contains("\nundo-limit 2\nundo-used 1\n"));
+        // Files written before the Undo setting existed carry no undo lines: defaults apply.
+        game.SavedGame legacy = game.SavedGame.parse(text.replace("undo-limit 2\n", "").replace("undo-used 1\n", ""));
+        check("save: undo lines optional (older files)",
+                legacy.config().undoLimit() == game.GameConfig.DEFAULT_UNDO_LIMIT && legacy.undoUsed() == 0
+                && legacy.moves().equals(saved.moves()));
+        boolean badUndo = false;
+        try { game.SavedGame.parse(text.replace("undo-used 1", "undo-used -1")); }
+        catch (IllegalArgumentException e) { badUndo = true; }
+        check("save: negative takeback count rejected", badUndo);
         // Replaying through a session reproduces the position.
         GameSession replay = new GameSession();
         for (String mv : back.moves()) replay.applyMove(findMove(replay.legalMoves(), mv));
@@ -405,7 +424,7 @@ public final class EngineTests {
         try { game.SavedGame.parse(text.replace("f1b5", "zz99")); } catch (IllegalArgumentException e) { rejectedMove = true; }
         check("save: malformed files are rejected", rejected && rejectedMove);
         check("save: empty move list allowed",
-                game.SavedGame.parse(new game.SavedGame(cfg, List.of(), 0, 0).serialize()).moves().isEmpty());
+                game.SavedGame.parse(new game.SavedGame(cfg, List.of(), 0, 0, 0).serialize()).moves().isEmpty());
     }
 
     private static void resignationAndAgreedDraw() {

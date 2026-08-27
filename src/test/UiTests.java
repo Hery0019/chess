@@ -4,7 +4,9 @@ import engine.Move;
 import engine.Pieces;
 import game.GameConfig;
 import game.GameSession;
+import game.SavedGame;
 import ui.BoardPanel;
+import ui.GamePanel;
 import ui.StartScreen;
 
 import javax.swing.AbstractButton;
@@ -21,7 +23,8 @@ import java.util.List;
  * Drives the Swing views with synthetic mouse events — no window, no
  * display needed (runs under {@code -Djava.awt.headless=true}). Covers the
  * BoardPanel interaction model (click-click, drag and drop, premoves,
- * flipped geometry) and the StartScreen's config emission. Plain main-class
+ * flipped geometry), the StartScreen's config emission and the GamePanel's
+ * takeback allowance. Plain main-class
  * runner; exit code != 0 on failure.
  */
 public final class UiTests {
@@ -41,6 +44,7 @@ public final class UiTests {
                 boardAnnotations();
                 boardPaintsInEveryState();
                 startScreenEmitsConfig();
+                gamePanelTakebackLimit();
             } catch (Exception e) {
                 e.printStackTrace();
                 failures++;
@@ -330,7 +334,8 @@ public final class UiTests {
                 && emitted.get(0).mode() == GameConfig.Mode.HUMAN_VS_AI
                 && emitted.get(0).humanColor() == Pieces.WHITE
                 && emitted.get(0).minutesPerSide() == GameConfig.NO_CLOCK
-                && emitted.get(0).aiDepth() == 4);
+                && emitted.get(0).aiDepth() == 4
+                && emitted.get(0).undoLimit() == GameConfig.DEFAULT_UNDO_LIMIT);
 
         // Change every option through the visible controls and start again.
         AbstractButton aiVsAi = findButton(s, "AI vs AI");
@@ -352,8 +357,28 @@ public final class UiTests {
                 cfg.mode() == GameConfig.Mode.HUMAN_VS_AI && cfg.humanColor() == Pieces.BLACK
                 && cfg.minutesPerSide() == 5 && cfg.aiDepth() == 2);
 
+        // Undo: Off greys out the limit pills and emits NO_UNDO; On + a pill emits that limit.
+        // Time and depth also have numeric pills, so the takeback "10" is the last one in the tree.
+        AbstractButton undoOff = findButton(s, "Off"), undoOn = findButton(s, "On");
+        AbstractButton ten = lastButton(s, "10");
+        check("start: undo controls exist", undoOff != null && undoOn != null && ten != null);
+        if (undoOff == null || undoOn == null || ten == null) return;
+        check("start: undo on by default, limit pills enabled", undoOn.isSelected() && ten.isEnabled());
+        undoOff.doClick();
+        check("start: limit pills disabled when undo is off", !ten.isEnabled());
+        start.doClick();
+        check("start: undo off emits NO_UNDO", emitted.get(emitted.size() - 1).undoLimit() == GameConfig.NO_UNDO);
+        undoOn.doClick();
+        ten.doClick();
+        start.doClick();
+        check("start: undo on emits the chosen limit", emitted.get(emitted.size() - 1).undoLimit() == 10);
+        aiVsAi.doClick();
+        check("start: undo controls disabled in AI vs AI", !undoOn.isEnabled() && !ten.isEnabled());
+        findButton(s, "Human vs AI").doClick();
+        check("start: undo controls re-enabled", undoOn.isEnabled() && ten.isEnabled());
+
         // Remembered settings are preselected and come back unchanged.
-        GameConfig remembered = new GameConfig(GameConfig.Mode.AI_VS_AI, Pieces.BLACK, 15, 6);
+        GameConfig remembered = new GameConfig(GameConfig.Mode.AI_VS_AI, Pieces.BLACK, 15, 6, 5);
         List<GameConfig> again = new ArrayList<>();
         StartScreen s2 = new StartScreen(remembered, "Tester", "localhost:5000", again::add, saved -> {}, req -> {});
         s2.setSize(640, 760);
@@ -382,7 +407,56 @@ public final class UiTests {
         check("online: host and join requests carry name, address and time",
                 requests.size() == 2 && requests.get(0).host() && !requests.get(1).host()
                 && requests.get(1).name().equals("Alice") && requests.get(1).address().equals("chess.example.org:6000")
-                && requests.get(1).minutes() == 10 && emitted.size() == 2);
+                && requests.get(1).minutes() == 10 && emitted.size() == 4);
+    }
+
+    // ---- GamePanel: takeback allowance ----
+
+    private static void gamePanelTakebackLimit() {
+        GamePanel.Host host = new GamePanel.Host() {
+            @Override public void newGame() { }
+            @Override public void startGame(GameConfig config) { }
+        };
+        List<String> moves = List.of("e2e4", "e7e5", "g1f3", "b8c6");   // White (human) to move
+
+        // One takeback allowed: usable once, then the button reports 0 left and greys out.
+        GameConfig one = new GameConfig(GameConfig.Mode.HUMAN_VS_AI, Pieces.WHITE, GameConfig.NO_CLOCK, 1, 1);
+        GamePanel panel = new GamePanel(one, new SavedGame(one, moves, 0, 0, 0), host);
+        panel.setSize(900, 700);
+        layoutTree(panel);
+        panel.startGame();
+        AbstractButton undo = findButtonStartingWith(panel, "Undo");
+        List<javax.swing.JTable> tables = new ArrayList<>();
+        collect(panel, javax.swing.JTable.class, tables);
+        check("game: undo button shows the allowance",
+                undo != null && "Undo (1 left)".equals(undo.getText()) && undo.isEnabled() && tables.size() == 1);
+        if (undo == null || tables.isEmpty()) return;
+        undo.doClick();
+        check("game: takeback removes the move and the AI reply", tables.get(0).getRowCount() == 1);
+        check("game: allowance spent greys out the button", "Undo (0 left)".equals(undo.getText()) && !undo.isEnabled());
+        undo.doClick();
+        check("game: no further takeback once spent", tables.get(0).getRowCount() == 1);
+        panel.dispose();
+
+        // A resumed game carries the takebacks already spent.
+        GameConfig two = new GameConfig(GameConfig.Mode.HUMAN_VS_AI, Pieces.WHITE, GameConfig.NO_CLOCK, 1, 2);
+        GamePanel resumed = new GamePanel(two, new SavedGame(two, moves, 0, 0, 1), host);
+        resumed.setSize(900, 700);
+        layoutTree(resumed);
+        resumed.startGame();
+        AbstractButton undo2 = findButtonStartingWith(resumed, "Undo");
+        check("game: resumed game remembers takebacks spent",
+                undo2 != null && "Undo (1 left)".equals(undo2.getText()) && undo2.isEnabled());
+        resumed.dispose();
+
+        // Undo switched off: no button at all.
+        GameConfig off = new GameConfig(GameConfig.Mode.HUMAN_VS_AI, Pieces.WHITE, GameConfig.NO_CLOCK, 1, GameConfig.NO_UNDO);
+        GamePanel noUndo = new GamePanel(off, new SavedGame(off, moves, 0, 0, 0), host);
+        noUndo.setSize(900, 700);
+        layoutTree(noUndo);
+        noUndo.startGame();
+        check("game: no undo button when takebacks are off", findButtonStartingWith(noUndo, "Undo") == null);
+        noUndo.dispose();
     }
 
     private static <T> void collect(Container root, Class<T> type, List<T> out) {
@@ -454,6 +528,22 @@ public final class UiTests {
                 if (found != null) return found;
             }
         }
+        return null;
+    }
+
+    /** The last button with this exact text in tree order (numeric pill labels repeat across controls). */
+    private static AbstractButton lastButton(Container root, String text) {
+        List<AbstractButton> all = new ArrayList<>();
+        collect(root, AbstractButton.class, all);
+        AbstractButton found = null;
+        for (AbstractButton b : all) if (text.equals(b.getText())) found = b;
+        return found;
+    }
+
+    private static AbstractButton findButtonStartingWith(Container root, String prefix) {
+        List<AbstractButton> all = new ArrayList<>();
+        collect(root, AbstractButton.class, all);
+        for (AbstractButton b : all) if (b.getText() != null && b.getText().startsWith(prefix)) return b;
         return null;
     }
 

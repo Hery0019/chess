@@ -9,9 +9,9 @@ import java.util.List;
 /**
  * A game in progress, serialised to a small line-oriented text file so it
  * can be resumed later: the configuration, the time each side has used,
- * and the moves in long algebraic notation. Moves are replayed through
- * {@link GameSession} on load, so a tampered file can only fail loudly,
- * never produce an illegal position.
+ * the takebacks already spent, and the moves in long algebraic notation.
+ * Moves are replayed through {@link GameSession} on load, so a tampered
+ * file can only fail loudly, never produce an illegal position.
  *
  * <pre>
  * chess-save 1
@@ -19,24 +19,34 @@ import java.util.List;
  * human WHITE
  * minutes 10
  * depth 4
+ * undo-limit 3
+ * undo-used 1
  * used 12345 6789
  * moves e2e4 e7e5 g1f3
  * </pre>
+ *
+ * The two {@code undo-*} lines are optional so files written before the
+ * Undo setting existed still load (with the default limit, none spent).
+ *
+ * @param undoUsed takebacks already spent in this game (counts against
+ *                 {@link GameConfig#undoLimit()})
  */
-public record SavedGame(GameConfig config, List<String> moves, long whiteUsedMillis, long blackUsedMillis) {
+public record SavedGame(GameConfig config, List<String> moves, long whiteUsedMillis, long blackUsedMillis,
+                        int undoUsed) {
 
     public static final String HEADER = "chess-save 1";
 
     public SavedGame {
         moves = List.copyOf(moves);
         if (whiteUsedMillis < 0 || blackUsedMillis < 0) throw new IllegalArgumentException("used time >= 0");
+        if (undoUsed < 0) throw new IllegalArgumentException("undo used >= 0");
     }
 
     /** Snapshot of a live session and clock. */
-    public static SavedGame of(GameConfig config, GameSession session, ChessClock clock) {
+    public static SavedGame of(GameConfig config, GameSession session, ChessClock clock, int undoUsed) {
         List<String> lan = new ArrayList<>();
         for (Move m : session.history()) lan.add(m.toString());
-        return new SavedGame(config, lan, clock.elapsedMillis(Pieces.WHITE), clock.elapsedMillis(Pieces.BLACK));
+        return new SavedGame(config, lan, clock.elapsedMillis(Pieces.WHITE), clock.elapsedMillis(Pieces.BLACK), undoUsed);
     }
 
     public String serialize() {
@@ -45,6 +55,8 @@ public record SavedGame(GameConfig config, List<String> moves, long whiteUsedMil
                 + "human " + GameConfig.colorName(config.humanColor()).toUpperCase() + "\n"
                 + "minutes " + config.minutesPerSide() + "\n"
                 + "depth " + config.aiDepth() + "\n"
+                + "undo-limit " + config.undoLimit() + "\n"
+                + "undo-used " + undoUsed + "\n"
                 + "used " + whiteUsedMillis + " " + blackUsedMillis + "\n"
                 + "moves " + String.join(" ", moves) + "\n";
     }
@@ -57,6 +69,7 @@ public record SavedGame(GameConfig config, List<String> moves, long whiteUsedMil
         }
         GameConfig.Mode mode = null;
         int human = -1, minutes = -1, depth = -1;
+        int undoLimit = GameConfig.DEFAULT_UNDO_LIMIT, undoUsed = 0;
         long whiteUsed = -1, blackUsed = -1;
         List<String> moves = null;
         for (int i = 1; i < lines.length; i++) {
@@ -75,6 +88,8 @@ public record SavedGame(GameConfig config, List<String> moves, long whiteUsedMil
                     };
                     case "minutes" -> minutes = Integer.parseInt(value);
                     case "depth" -> depth = Integer.parseInt(value);
+                    case "undo-limit" -> undoLimit = Integer.parseInt(value);
+                    case "undo-used" -> undoUsed = Integer.parseInt(value);
                     case "used" -> {
                         String[] parts = value.split("\\s+");
                         whiteUsed = Long.parseLong(parts[0]);
@@ -93,6 +108,12 @@ public record SavedGame(GameConfig config, List<String> moves, long whiteUsedMil
         for (String m : moves) {
             if (!m.matches("[a-h][1-8][a-h][1-8][nbrq]?")) throw new IllegalArgumentException("bad move token " + m);
         }
-        return new SavedGame(new GameConfig(mode, human, minutes, depth), moves, whiteUsed, blackUsed);
+        GameConfig config;
+        try {
+            config = new GameConfig(mode, human, minutes, depth, undoLimit);
+        } catch (IllegalArgumentException e) {
+            throw new IllegalArgumentException("bad settings: " + e.getMessage(), e);
+        }
+        return new SavedGame(config, moves, whiteUsed, blackUsed, undoUsed);
     }
 }

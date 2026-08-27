@@ -126,7 +126,7 @@ public final class MainFrame extends JFrame implements GamePanel.Host {
     // ---- online games ----
 
     private void startOnline(StartScreen.OnlineRequest req) {
-        Prefs.saveLastConfig(new GameConfig(GameConfig.Mode.ONLINE, Pieces.WHITE, req.minutes(), 1));
+        Prefs.saveLastConfig(new GameConfig(GameConfig.Mode.ONLINE, Pieces.WHITE, req.minutes(), 1, GameConfig.NO_UNDO));
         Prefs.saveOnline(req.name(), req.address());
         closeOnline();
 
@@ -203,7 +203,7 @@ public final class MainFrame extends JFrame implements GamePanel.Host {
             int color = "WHITE".equals(m.arg(0)) ? Pieces.WHITE : Pieces.BLACK;
             int minutes;
             try { minutes = Integer.parseInt(m.arg(1)); } catch (RuntimeException e) { minutes = 0; }
-            GameConfig config = new GameConfig(GameConfig.Mode.ONLINE, color, minutes, 1);
+            GameConfig config = new GameConfig(GameConfig.Mode.ONLINE, color, minutes, 1, GameConfig.NO_UNDO);
             if (lobby != null) {
                 remove(lobby);
                 lobby = null;
