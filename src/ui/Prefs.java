@@ -56,6 +56,23 @@ final class Prefs {
         }
     }
 
+    static String onlineName() {
+        try { return P.get("online.name", System.getProperty("user.name", "Player")); }
+        catch (RuntimeException e) { return "Player"; }
+    }
+
+    static String onlineAddress() {
+        try { return P.get("online.address", "localhost:" + net.Protocol.DEFAULT_PORT); }
+        catch (RuntimeException e) { return "localhost:" + net.Protocol.DEFAULT_PORT; }
+    }
+
+    static void saveOnline(String name, String address) {
+        try {
+            P.put("online.name", name);
+            P.put("online.address", address);
+        } catch (RuntimeException ignored) { }
+    }
+
     static void saveLastConfig(GameConfig c) {
         try {
             P.put("cfg.mode", c.mode().name());

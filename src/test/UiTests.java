@@ -316,7 +316,7 @@ public final class UiTests {
 
     private static void startScreenEmitsConfig() {
         List<GameConfig> emitted = new ArrayList<>();
-        StartScreen s = new StartScreen(null, emitted::add, saved -> {});
+        StartScreen s = new StartScreen(null, "Tester", "localhost:5000", emitted::add, saved -> {}, req -> {});
         s.setSize(640, 760);
         layoutTree(s);
         s.paint(new BufferedImage(640, 760, BufferedImage.TYPE_INT_RGB).getGraphics());
@@ -355,13 +355,41 @@ public final class UiTests {
         // Remembered settings are preselected and come back unchanged.
         GameConfig remembered = new GameConfig(GameConfig.Mode.AI_VS_AI, Pieces.BLACK, 15, 6);
         List<GameConfig> again = new ArrayList<>();
-        StartScreen s2 = new StartScreen(remembered, again::add, saved -> {});
+        StartScreen s2 = new StartScreen(remembered, "Tester", "localhost:5000", again::add, saved -> {}, req -> {});
         s2.setSize(640, 760);
         layoutTree(s2);
         AbstractButton black2 = findButton(s2, "Black");
         findButton(s2, "Start Game").doClick();
         check("start: remembered settings preselected",
                 again.size() == 1 && again.get(0).equals(remembered) && black2 != null && !black2.isEnabled());
+
+        // Online mode: side/strength disabled, name and address travel with the request.
+        List<StartScreen.OnlineRequest> requests = new ArrayList<>();
+        StartScreen s3 = new StartScreen(null, "Alice", "192.168.1.10:5000", emitted::add, saved -> {}, requests::add);
+        s3.setSize(640, 760);
+        layoutTree(s3);
+        findButton(s3, "Online 1 v 1").doClick();
+        AbstractButton depth3 = findButton(s3, "6");
+        check("online: side and strength disabled", !findButton(s3, "Black").isEnabled() && depth3 != null && !depth3.isEnabled());
+        List<javax.swing.JTextField> fields = new ArrayList<>();
+        collect(s3, javax.swing.JTextField.class, fields);
+        check("online: name and address fields prefilled",
+                fields.size() == 2 && fields.get(0).getText().equals("Alice") && fields.get(1).getText().equals("192.168.1.10:5000"));
+        fields.get(1).setText("chess.example.org:6000");
+        findButton(s3, "10").doClick();
+        findButton(s3, "Host game").doClick();
+        findButton(s3, "Join game").doClick();
+        check("online: host and join requests carry name, address and time",
+                requests.size() == 2 && requests.get(0).host() && !requests.get(1).host()
+                && requests.get(1).name().equals("Alice") && requests.get(1).address().equals("chess.example.org:6000")
+                && requests.get(1).minutes() == 10 && emitted.size() == 2);
+    }
+
+    private static <T> void collect(Container root, Class<T> type, List<T> out) {
+        for (Component c : root.getComponents()) {
+            if (type.isInstance(c)) out.add(type.cast(c));
+            if (c instanceof Container ct) collect(ct, type, out);
+        }
     }
 
     // ---- helpers ----
