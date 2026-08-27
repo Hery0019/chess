@@ -61,7 +61,8 @@ flag-fall-vs-bare-king draw per FIDE 6.9). Both exit non-zero on failure.
 ## Architecture
 
 ```
-engine/   Board, Move, MoveGenerator, Zobrist, Evaluator, Search, TranspositionTable, Perft
+engine/   Board, Move, MoveGenerator, Zobrist, Evaluator, Search, TranspositionTable,
+          OpeningBook, Perft
           Pure rules + search. Zero dependencies on game/ or ui/. No Swing.
 game/     GameSession, ChessClock, GameConfig, GameResult
           Everything above single-position level: history, repetition table,
@@ -118,6 +119,9 @@ worker harmless. The 100 ms UI timer is a *sampler* only: the clock is
   perpetual (both covered by tests).
 - Check extension, killer moves, history heuristic, principal variation
   reported to the UI (eval, depth, nodes, time in the status line).
+- **Opening book** (`OpeningBook`): ~30 mainstream lines expanded into a
+  Zobrist-keyed map at class load (every entry verified legal), probed
+  before searching; a random book move gives opening variety at zero cost.
 
 ## Known limitations
 

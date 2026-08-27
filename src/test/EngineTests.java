@@ -32,6 +32,7 @@ public final class EngineTests {
         searchAvoidsRepetitionWhenWinning();
         searchIterativeDeepening();
         searchReusesTableAcrossCalls();
+        openingBook();
         promotionMovesPresent();
         timeoutAdjudication();
 
@@ -264,6 +265,26 @@ public final class EngineTests {
         check("search: table reuse keeps the mate-in-2 answer",
                 r1 != null && r2 != null && r1.score() == Search.MATE_SCORE - 3
                 && r2.score() == Search.MATE_SCORE - 3 && r2.bestMove().equals(r1.bestMove()));
+    }
+
+    private static void openingBook() {
+        // Loading the class validates every line (an illegal token throws).
+        check("book: holds a reasonable number of positions", OpeningBook.positionCount() > 100);
+        Board start = Board.startPosition();
+        Move m = OpeningBook.probe(start);
+        check("book: start position has a legal book move",
+                m != null && new MoveGenerator().generateLegal(start).contains(m));
+        // Follow the book through a whole line: every probe is legal until it runs out.
+        Board b = Board.startPosition();
+        int plies = 0;
+        for (Move bm; (bm = OpeningBook.probe(b, new java.util.Random(7))) != null; plies++) {
+            if (!new MoveGenerator().generateLegal(b).contains(bm)) { plies = -1; break; }
+            b.makeMove(bm, new Undo());
+        }
+        check("book: a random walk stays legal and ends after a few moves", plies >= 4 && plies <= 12);
+        // Transposition: 1.Nf3 Nf6 2.c4 g6 reaches a 1.d4-book position by a different order — no matter, same key.
+        Board kiwipete = Board.fromFen("r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1");
+        check("book: out-of-book position probes null", OpeningBook.probe(kiwipete) == null);
     }
 
     private static void promotionMovesPresent() {
