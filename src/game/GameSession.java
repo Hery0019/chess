@@ -43,12 +43,22 @@ public final class GameSession {
     private final List<Undo> undos = new ArrayList<>();
     private GameResult result = GameResult.ONGOING;
     private List<Move> cachedLegal;   // invalidated on every applyMove
+    /** False for a session owned by a server thread (no EDT confinement). */
+    private final boolean edtConfined;
 
     public GameSession() { this(Board.startPosition()); }
 
     /** Test seam: start from an arbitrary position. */
-    public GameSession(Board initial) {
+    public GameSession(Board initial) { this(initial, true); }
+
+    /**
+     * @param edtConfined true for the UI's session (asserts EDT access when a
+     *                    display exists); false for the network server's referee
+     *                    session, which lives on a socket thread
+     */
+    public GameSession(Board initial, boolean edtConfined) {
         this.board = initial;
+        this.edtConfined = edtConfined;
         repetitions.put(board.zobristKey(), 1);
         keyHistory.add(board.zobristKey());
         adjudicate();   // the initial position may already be terminal
@@ -74,7 +84,7 @@ public final class GameSession {
 
     /** Legal moves in the current position (cached until the next applyMove). */
     public List<Move> legalMoves() {
-        assert javax.swing.SwingUtilities.isEventDispatchThread() || !isGuiPresent()
+        assert !edtConfined || javax.swing.SwingUtilities.isEventDispatchThread() || !isGuiPresent()
                 : "GameSession accessed off the EDT";
         if (cachedLegal == null) cachedLegal = gen.generateLegal(board);
         return cachedLegal;
@@ -89,7 +99,7 @@ public final class GameSession {
      *         stale-worker race.
      */
     public void applyMove(Move m) {
-        assert javax.swing.SwingUtilities.isEventDispatchThread() || !isGuiPresent()
+        assert !edtConfined || javax.swing.SwingUtilities.isEventDispatchThread() || !isGuiPresent()
                 : "GameSession accessed off the EDT";
         if (result.isOver()) throw new IllegalStateException("game is over");
         if (!legalMoves().contains(m)) throw new IllegalArgumentException("illegal move: " + m);
@@ -116,7 +126,7 @@ public final class GameSession {
      * @throws IllegalStateException if there is no move to take back
      */
     public Move undoLastMove() {
-        assert javax.swing.SwingUtilities.isEventDispatchThread() || !isGuiPresent()
+        assert !edtConfined || javax.swing.SwingUtilities.isEventDispatchThread() || !isGuiPresent()
                 : "GameSession accessed off the EDT";
         if (history.isEmpty()) throw new IllegalStateException("nothing to undo");
         int last = history.size() - 1;
@@ -157,6 +167,18 @@ public final class GameSession {
     public void agreeDraw() {
         if (result.isOver()) return;
         result = GameResult.DRAW_AGREED;
+    }
+
+    /** {@code color} disconnected from an online game and forfeits; no effect once the game is over. */
+    public void abandon(int color) {
+        if (result.isOver()) return;
+        result = color == WHITE ? GameResult.BLACK_WINS_ABANDON : GameResult.WHITE_WINS_ABANDON;
+    }
+
+    /** Our own connection dropped: the game cannot continue and has no winner. */
+    public void abort() {
+        if (result.isOver()) return;
+        result = GameResult.ABORTED_CONNECTION;
     }
 
     // ---- adjudication ----

@@ -1,5 +1,6 @@
 # Compiles everything into out\ and packages an executable chess.jar.
 # Usage: .\build.ps1        then        java -jar chess.jar
+#                                       java -cp chess.jar app.ServerMain [port]   (online relay server)
 $ErrorActionPreference = 'Stop'
 Set-Location $PSScriptRoot
 
@@ -23,6 +24,6 @@ $sources = Get-ChildItem -Recurse -Filter *.java src | ForEach-Object { $_.FullN
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 Set-Content -Path out\MANIFEST.MF -Value "Main-Class: app.Main" -Encoding ascii
-& $jar --create --file chess.jar --manifest out\MANIFEST.MF -C out app -C out engine -C out game -C out ui
+& $jar --create --file chess.jar --manifest out\MANIFEST.MF -C out app -C out engine -C out game -C out net -C out ui
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 Write-Host "Built chess.jar  (run: java -jar chess.jar)"
