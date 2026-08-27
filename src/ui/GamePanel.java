@@ -8,23 +8,40 @@ import engine.Search;
 import game.ChessClock;
 import game.GameConfig;
 import game.GameSession;
+import game.Notation;
 
 import javax.swing.BorderFactory;
 import javax.swing.JButton;
+import javax.swing.JComponent;
+import javax.swing.JFileChooser;
 import javax.swing.JLabel;
+import javax.swing.JOptionPane;
 import javax.swing.JPanel;
+import javax.swing.JScrollPane;
+import javax.swing.JTable;
+import javax.swing.ListSelectionModel;
 import javax.swing.SwingWorker;
 import javax.swing.Timer;
+import javax.swing.table.AbstractTableModel;
+import javax.swing.table.DefaultTableCellRenderer;
 import java.awt.BorderLayout;
+import java.awt.Component;
+import java.awt.Dimension;
 import java.awt.FlowLayout;
 import java.awt.Font;
+import java.awt.GridLayout;
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
- * One live game: board view, two clocks, status line, controls, and the AI
- * worker lifecycle. All game-state mutation happens on the EDT; the worker
- * thread only ever reads a private {@link Board#copy()}.
+ * One live game: board view, two clocks, status line, move list, controls,
+ * and the AI worker lifecycle. All game-state mutation happens on the EDT;
+ * the worker thread only ever reads a private {@link Board#copy()}.
  *
  * CONCURRENCY DESIGN (reviewed, points 8-9):
  *  - The 100 ms Swing timer is a *sampler*: it repaints clock labels and
@@ -38,7 +55,8 @@ import java.util.concurrent.atomic.AtomicBoolean;
  *    session's own legality validation is the final backstop.
  *  - Cancellation is cooperative: the search polls an AtomicBoolean. We never
  *    interrupt or kill the thread; a cancelled worker returns null quickly
- *    and its result is discarded.
+ *    and its result is discarded. The shared Search is synchronized, so a
+ *    late worker simply finishes before the next one starts.
  */
 public final class GamePanel extends JPanel {
 
@@ -63,6 +81,8 @@ public final class GamePanel extends JPanel {
     private final JLabel bottomNameLabel = new JLabel();
     private final JLabel statusLabel = new JLabel();
     private final JButton pauseButton = new JButton("Pause");
+    private final MoveTableModel moveModel = new MoveTableModel();
+    private final JTable moveTable = new JTable(moveModel);
     private final Timer uiTimer;
 
     private int topColor;            // color shown at the top of the window
@@ -99,36 +119,74 @@ public final class GamePanel extends JPanel {
         top.add(topNameLabel);
         top.add(topClockLabel);
 
-        JPanel controls = new JPanel(new FlowLayout(FlowLayout.RIGHT));
+        JPanel bottom = new JPanel(new FlowLayout(FlowLayout.LEFT));
+        bottom.add(bottomNameLabel);
+        bottom.add(bottomClockLabel);
+        bottom.add(statusLabel);
+
+        JPanel center = new JPanel(new BorderLayout(8, 8));
+        center.add(top, BorderLayout.NORTH);
+        center.add(boardPanel, BorderLayout.CENTER);
+        center.add(bottom, BorderLayout.SOUTH);
+
+        setBorder(BorderFactory.createEmptyBorder(8, 8, 8, 8));
+        add(center, BorderLayout.CENTER);
+        add(buildSidePanel(onNewGame), BorderLayout.EAST);
+
+        uiTimer = new Timer(TIMER_PERIOD_MS, e -> onTick());
+    }
+
+    /** Move list plus the game controls, to the right of the board. */
+    private JComponent buildSidePanel(Runnable onNewGame) {
+        JPanel side = new JPanel(new BorderLayout(0, 8));
+        side.setPreferredSize(new Dimension(250, 0));
+
+        JLabel title = new JLabel("Moves");
+        title.setFont(title.getFont().deriveFont(Font.BOLD, 14f));
+        title.setBorder(BorderFactory.createEmptyBorder(6, 2, 0, 0));
+
+        moveTable.setRowHeight(22);
+        moveTable.setShowGrid(false);
+        moveTable.setIntercellSpacing(new Dimension(0, 0));
+        moveTable.setFillsViewportHeight(true);
+        moveTable.setRowSelectionAllowed(false);
+        moveTable.setFocusable(false);
+        moveTable.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
+        moveTable.setFont(new Font(Font.SANS_SERIF, Font.PLAIN, 14));
+        moveTable.getTableHeader().setReorderingAllowed(false);
+        moveTable.getColumnModel().getColumn(0).setMaxWidth(44);
+        moveTable.setDefaultRenderer(Object.class, new MoveCellRenderer());
+        JScrollPane scroll = new JScrollPane(moveTable);
+
         pauseButton.setVisible(config.mode() == GameConfig.Mode.AI_VS_AI);
         pauseButton.addActionListener(e -> togglePause());
         JButton flipBoard = new JButton("Flip Board");
         flipBoard.addActionListener(e -> flipBoard());
+        JButton exportPgn = new JButton("Export PGN…");
+        exportPgn.addActionListener(e -> exportPgn());
         JButton newGame = new JButton("New Game");
         newGame.addActionListener(e -> onNewGame.run());
-        controls.add(flipBoard);
-        controls.add(pauseButton);
-        controls.add(newGame);
 
-        JPanel bottom = new JPanel(new BorderLayout());
-        JPanel bottomLeft = new JPanel(new FlowLayout(FlowLayout.LEFT));
-        bottomLeft.add(bottomNameLabel);
-        bottomLeft.add(bottomClockLabel);
-        bottomLeft.add(statusLabel);
-        bottom.add(bottomLeft, BorderLayout.CENTER);
-        bottom.add(controls, BorderLayout.EAST);
+        JPanel buttons = new JPanel(new GridLayout(0, 2, 6, 6));
+        buttons.add(flipBoard);
+        buttons.add(pauseButton);
+        buttons.add(exportPgn);
+        buttons.add(newGame);
 
-        setBorder(BorderFactory.createEmptyBorder(8, 8, 8, 8));
-        add(top, BorderLayout.NORTH);
-        add(boardPanel, BorderLayout.CENTER);
-        add(bottom, BorderLayout.SOUTH);
-
-        uiTimer = new Timer(TIMER_PERIOD_MS, e -> onTick());
+        side.add(title, BorderLayout.NORTH);
+        side.add(scroll, BorderLayout.CENTER);
+        side.add(buttons, BorderLayout.SOUTH);
+        return side;
     }
 
     private String playerName(int color) {
         String base = GameConfig.colorName(color);
         return config.isAi(color) ? base + " (AI, depth " + config.aiDepth() + ")" : base;
+    }
+
+    /** Name for the PGN tags: who actually played the side. */
+    private String pgnName(int color) {
+        return config.isAi(color) ? "AI (depth " + config.aiDepth() + ")" : "Human";
     }
 
     private void updateNameLabels() {
@@ -143,6 +201,21 @@ public final class GamePanel extends JPanel {
         boardPanel.setFlipped(topColor == Pieces.WHITE);
         updateNameLabels();
         refresh();
+    }
+
+    private void exportPgn() {
+        JFileChooser chooser = new JFileChooser();
+        chooser.setDialogTitle("Export PGN");
+        chooser.setSelectedFile(new java.io.File("game.pgn"));
+        if (chooser.showSaveDialog(this) != JFileChooser.APPROVE_OPTION) return;
+        Path target = chooser.getSelectedFile().toPath();
+        try {
+            Files.writeString(target, Notation.pgn(session, pgnName(Pieces.WHITE), pgnName(Pieces.BLACK)),
+                    StandardCharsets.UTF_8);
+        } catch (IOException ex) {
+            JOptionPane.showMessageDialog(this, "Could not write " + target + ":\n" + ex.getMessage(),
+                    "Export PGN", JOptionPane.ERROR_MESSAGE);
+        }
     }
 
     /** Called once by MainFrame after the panel is shown. */
@@ -282,14 +355,62 @@ public final class GamePanel extends JPanel {
         } else if (paused) {
             status = "Paused";
         } else if (activeWorker != null) {
-            status = "AI is thinking\u2026";
+            status = "AI is thinking…";
             if (boardPanel.hasPremove()) status += "   (premove: " + boardPanel.premoveText() + ")";
         } else {
             status = session.statusText();
             if (lastAiInfo != null) status += "   ·   AI " + lastAiInfo;
         }
         statusLabel.setText("   " + status);
+        syncMoveList();
         boardPanel.repaint();
+    }
+
+    private void syncMoveList() {
+        if (moveModel.plies() == session.plyCount()) return;
+        moveModel.setMoves(session.sanHistory());
+        int last = moveModel.getRowCount() - 1;
+        if (last >= 0) moveTable.scrollRectToVisible(moveTable.getCellRect(last, 0, true));
+    }
+
+    // ---- move list ----
+
+    /** Rows of "n. white black"; the last ply is rendered in bold. */
+    private static final class MoveTableModel extends AbstractTableModel {
+        private static final String[] COLUMNS = {"#", "White", "Black"};
+        private List<String> sans = new ArrayList<>();
+
+        int plies() { return sans.size(); }
+
+        void setMoves(List<String> moves) {
+            sans = new ArrayList<>(moves);
+            fireTableDataChanged();
+        }
+
+        boolean isLastPly(int row, int col) {
+            return col > 0 && (row * 2 + col - 1) == sans.size() - 1;
+        }
+
+        @Override public int getRowCount() { return (sans.size() + 1) / 2; }
+        @Override public int getColumnCount() { return COLUMNS.length; }
+        @Override public String getColumnName(int c) { return COLUMNS[c]; }
+        @Override public Object getValueAt(int row, int col) {
+            if (col == 0) return (row + 1) + ".";
+            int ply = row * 2 + col - 1;
+            return ply < sans.size() ? sans.get(ply) : "";
+        }
+    }
+
+    private final class MoveCellRenderer extends DefaultTableCellRenderer {
+        @Override
+        public Component getTableCellRendererComponent(JTable t, Object v, boolean sel, boolean foc, int row, int col) {
+            Component c = super.getTableCellRendererComponent(t, v, false, false, row, col);
+            boolean last = moveModel.isLastPly(row, col);
+            c.setFont(c.getFont().deriveFont(last ? Font.BOLD : Font.PLAIN));
+            setHorizontalAlignment(col == 0 ? RIGHT : LEFT);
+            setForeground(col == 0 ? java.awt.Color.GRAY : t.getForeground());
+            return c;
+        }
     }
 
     // ---- AI worker ----

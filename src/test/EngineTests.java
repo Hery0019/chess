@@ -33,6 +33,8 @@ public final class EngineTests {
         searchIterativeDeepening();
         searchReusesTableAcrossCalls();
         openingBook();
+        sanNotation();
+        pgnExport();
         promotionMovesPresent();
         timeoutAdjudication();
 
@@ -285,6 +287,51 @@ public final class EngineTests {
         // Transposition: 1.Nf3 Nf6 2.c4 g6 reaches a 1.d4-book position by a different order — no matter, same key.
         Board kiwipete = Board.fromFen("r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1");
         check("book: out-of-book position probes null", OpeningBook.probe(kiwipete) == null);
+    }
+
+    private static void sanNotation() {
+        GameSession s = new GameSession();
+        for (String mv : new String[]{"e2e4", "e7e5", "g1f3", "b8c6", "f1c4", "g8f6",
+                                      "e1g1", "f6e4", "f1e1", "d7d5", "c4d5", "d8d5"}) {
+            s.applyMove(findMove(s.legalMoves(), mv));
+        }
+        check("san: pieces, captures, castling, pawn moves",
+                String.join(" ", s.sanHistory()).equals("e4 e5 Nf3 Nc6 Bc4 Nf6 O-O Nxe4 Re1 d5 Bxd5 Qxd5"));
+
+        check("san: file disambiguation (Nce2 / Nge2)",
+                sanOf("4k3/8/8/8/8/2N5/8/4K1N1 w - - 0 1", "c3e2").equals("Nce2")
+             && sanOf("4k3/8/8/8/8/2N5/8/4K1N1 w - - 0 1", "g1e2").equals("Nge2"));
+        check("san: rank disambiguation (R1a3 / R5a3)",
+                sanOf("4k3/8/8/R7/8/8/8/R3K3 w - - 0 1", "a1a3").equals("R1a3")
+             && sanOf("4k3/8/8/R7/8/8/8/R3K3 w - - 0 1", "a5a3").equals("R5a3"));
+        check("san: no disambiguation when the other piece is pinned or cannot reach",
+                sanOf("4k3/8/8/8/8/8/8/R3K2R w - - 0 1", "a1b1").equals("Rb1"));
+        check("san: mate suffix", sanOf("6k1/5ppp/8/8/8/8/8/R6K w - - 0 1", "a1a8").equals("Ra8#"));
+        check("san: promotion with check", sanOf("8/P7/8/8/8/8/8/k6K w - - 0 1", "a7a8q").equals("a8=Q+"));
+        check("san: en passant is a pawn capture", sanOf("4k3/8/8/3pP3/8/8/8/4K3 w - d6 0 1", "e5d6").equals("exd6"));
+        check("san: queenside castling with check",
+                sanOf("3k4/8/8/8/8/8/8/R3K3 w Q - 0 1", "e1c1").equals("O-O-O+"));
+    }
+
+    private static String sanOf(String fen, String lan) {
+        Board b = Board.fromFen(fen);
+        java.util.List<Move> legal = new MoveGenerator().generateLegal(b);
+        return game.Notation.san(b, findMove(legal, lan), legal);
+    }
+
+    private static void pgnExport() {
+        GameSession s = new GameSession();
+        for (String mv : new String[]{"e2e4", "e7e5", "d1h5", "b8c6", "f1c4", "g8f6", "h5f7"}) {
+            s.applyMove(findMove(s.legalMoves(), mv));
+        }
+        String pgn = game.Notation.pgn(s, "Tester", "Engine \"v2\"");
+        check("pgn: result tag and token for a mate",
+                pgn.contains("[Result \"1-0\"]") && pgn.trim().endsWith("4. Qxf7# 1-0"));
+        check("pgn: seven-tag roster with escaped quotes",
+                pgn.contains("[White \"Tester\"]") && pgn.contains("[Black \"Engine \\\"v2\\\"\"]")
+             && pgn.contains("[Event ") && pgn.contains("[Date "));
+        check("pgn: numbered move text", pgn.contains("1. e4 e5 2. Qh5 Nc6 3. Bc4 Nf6"));
+        check("pgn: ongoing game ends with *", game.Notation.pgn(new GameSession(), "a", "b").trim().endsWith("*"));
     }
 
     private static void promotionMovesPresent() {

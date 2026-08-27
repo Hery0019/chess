@@ -19,6 +19,8 @@ quiescence search. Java 21, zero external dependencies.
   a queen), otherwise it is silently dropped. Any left-click on the board
   cancels a pending premove (and may start a new one); right-click cancels
   without selecting. One premove is held at a time.
+- **Move list** in standard algebraic notation beside the board, and
+  **Export PGN…** to save the game (seven-tag roster + move text).
 - **Flip Board** rotates the view; **New Game** returns to the start screen.
 
 ## Build & run
@@ -64,7 +66,7 @@ flag-fall-vs-bare-king draw per FIDE 6.9). Both exit non-zero on failure.
 engine/   Board, Move, MoveGenerator, Zobrist, Evaluator, Search, TranspositionTable,
           OpeningBook, Perft
           Pure rules + search. Zero dependencies on game/ or ui/. No Swing.
-game/     GameSession, ChessClock, GameConfig, GameResult
+game/     GameSession, ChessClock, GameConfig, GameResult, Notation (SAN / PGN)
           Everything above single-position level: history, repetition table,
           draw adjudication, clocks, timeout verdicts. No Swing widgets.
 ui/       MainFrame, StartScreen, GamePanel, BoardPanel, PieceRenderer
