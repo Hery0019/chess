@@ -64,6 +64,13 @@
   #moves li:last-child { font-weight: 700; }
   .buttons { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 10px; }
   .buttons button { padding: 8px 6px; font-size: 13px; }
+  #banner { position: fixed; inset: 0; display: none; align-items: center; justify-content: center; background: rgba(0,0,0,.35); cursor: pointer; }
+  #banner.on { display: flex; }
+  #banner div { background: rgba(43,37,32,.93); color: var(--card); border: 3px solid #f6c453; border-radius: 22px;
+                padding: 22px 40px; text-align: center; box-shadow: 0 12px 40px rgba(0,0,0,.5); max-width: 92vw; }
+  #banner h2 { margin: 0; font-size: clamp(30px, 8vw, 56px); letter-spacing: .04em; }
+  #banner p { margin: 8px 0 0; font-size: clamp(15px, 3vw, 22px); color: #d6c8b2; }
+  #banner small { display: block; margin-top: 10px; font-size: 12px; color: #a89c8a; }
   #promo { position: fixed; inset: 0; display: none; align-items: center; justify-content: center; background: rgba(0,0,0,.45); }
   #promo.on { display: flex; }
   #promo div { background: var(--card); padding: 14px; border-radius: 14px; display: flex; gap: 10px; }
@@ -107,6 +114,8 @@
     </div>
   </div>
 </div>
+
+<div id="banner"><div><h2 id="bannerTitle"></h2><p id="bannerText"></p><small>tap to look at the position</small></div></div>
 
 <div id="promo"><div>
   <button data-p="q">♛</button><button data-p="r">♜</button><button data-p="b">♝</button><button data-p="n">♞</button>
@@ -315,10 +324,20 @@
     over = true; legal = []; selected = -1; pendingPromotion = null;
     $('promo').classList.remove('on');
     setStatus(text);
+    showBanner(text);
     $('resignBtn').hidden = true; $('drawBtn').hidden = true; $('acceptBtn').hidden = true; $('declineBtn').hidden = true;
     $('rematchBtn').hidden = opponentGone || !ws || ws.readyState !== 1;
     $('leaveBtn').hidden = false;
     render();
+  }
+
+  /** Big centred announcement (checkmate, draw...); a tap puts it away to look at the position. */
+  function showBanner(text) {
+    const title = /^checkmate/i.test(text) ? 'CHECKMATE' : /stalemate/i.test(text) ? 'STALEMATE' : /^draw/i.test(text) ? 'DRAW'
+                : /time/i.test(text) ? 'TIME OUT' : /resign/i.test(text) ? 'RESIGNATION' : 'GAME OVER';
+    $('bannerTitle').textContent = title;
+    $('bannerText').textContent = text;
+    $('banner').classList.add('on');
   }
 
   function setStatus(text, isError) { const s = $('status'); s.textContent = text; s.classList.toggle('error', !!isError); }
@@ -341,6 +360,7 @@
     });
   }
   $('promo').addEventListener('click', e => { if (e.target === $('promo')) { $('promo').classList.remove('on'); pendingPromotion = null; } });
+  $('banner').addEventListener('click', () => $('banner').classList.remove('on'));
   $('name').focus();
 })();
 </script>

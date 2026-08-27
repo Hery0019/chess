@@ -8,6 +8,7 @@ import engine.Pieces;
 import engine.Search;
 import game.ChessClock;
 import game.GameConfig;
+import game.GameResult;
 import game.GameSession;
 import game.Notation;
 import game.SavedGame;
@@ -484,6 +485,8 @@ public final class GamePanel extends JPanel {
     private void endGame() {
         clock.stop();
         boardPanel.setInteractionEnabled(false);
+        String[] banner = bannerFor(session.result());
+        boardPanel.showBanner(banner[0], banner[1]);
         // The timer keeps running only to no purpose; stop it.
         uiTimer.stop();
         if (!endDialogShown) {
@@ -492,6 +495,25 @@ public final class GamePanel extends JPanel {
             t.setRepeats(false);
             t.start();
         }
+    }
+
+    /** Title and line of the announcement painted over the board when a game ends. */
+    public static String[] bannerFor(GameResult r) {
+        String title = switch (r) {
+            case WHITE_WINS_MATE, BLACK_WINS_MATE -> "Checkmate";
+            case DRAW_STALEMATE -> "Stalemate";
+            case DRAW_AGREED, DRAW_REPETITION, DRAW_FIFTY_MOVES, DRAW_INSUFFICIENT_MATERIAL, DRAW_TIMEOUT_VS_BARE_KING -> "Draw";
+            case WHITE_WINS_TIMEOUT, BLACK_WINS_TIMEOUT -> "Time out";
+            case WHITE_WINS_RESIGNATION, BLACK_WINS_RESIGNATION -> "Resignation";
+            case WHITE_WINS_ABANDON, BLACK_WINS_ABANDON -> "Opponent left";
+            default -> "Game over";
+        };
+        // Messages read "Checkmate — White wins" / "Draw — stalemate": the part after the dash is the line.
+        String msg = r.message();
+        int dash = msg.indexOf(" — ");
+        String line = dash >= 0 ? msg.substring(dash + 3) : msg;
+        if (!line.isEmpty()) line = Character.toUpperCase(line.charAt(0)) + line.substring(1);
+        return new String[]{title.toUpperCase(), line};
     }
 
     /** Takebacks still available in this game: 0 when Undo is off or the allowance is spent. */
@@ -537,6 +559,7 @@ public final class GamePanel extends JPanel {
         boardPanel.stopAnimation();
         boardPanel.cancelPremove();
         boardPanel.clearSelection();
+        boardPanel.clearBanner();
         lastAiInfo = null;
         if (wasOver) {
             endDialogShown = false;   // the game may end again

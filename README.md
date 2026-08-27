@@ -56,8 +56,11 @@ opening book. Java 21, zero external dependencies.
 - **Resign** and **Offer draw** (Human vs AI): the AI accepts a draw when
   its last search rated its own position no better than about +0.30 and
   the game has left the opening; otherwise the offer is declined.
-- **Game over** dialog offers a rematch (colours swapped), a new game, or
-  staying on the final position to review it.
+- **Game over** is announced with a large banner over the board
+  (CHECKMATE / STALEMATE / DRAW / TIME OUT... and who won; a click puts it
+  away to look at the position — the browser client shows the same), then
+  a dialog offers a rematch (colours swapped), a new game, or staying on
+  the final position.
 - Window placement, the sound switch and the last start-screen settings
   are remembered between runs (`java.util.prefs`).
 - **Flip Board** rotates the view; **New Game** returns to the start screen.
