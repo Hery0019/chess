@@ -78,6 +78,9 @@ public final class OpeningBook {
     /** Number of distinct positions with at least one book move. */
     public static int positionCount() { return BOOK.size(); }
 
+    /** The book lines, each a space-separated sequence of moves in long algebraic notation. */
+    public static List<String> lines() { return List.of(LINES); }
+
     private static Map<Long, List<Move>> build() {
         Map<Long, List<Move>> map = new HashMap<>();
         MoveGenerator gen = new MoveGenerator();

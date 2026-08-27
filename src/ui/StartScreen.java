@@ -98,14 +98,22 @@ public final class StartScreen extends JPanel {
     /** Takeback allowances offered when Undo is on. */
     private static final List<Integer> UNDO_LIMITS = List.of(1, 2, 3, 5, 10);
 
+    /** Depths on offer; the search is selective enough that 8 and 10 stay playable. */
+    private static final List<Integer> DEPTHS = List.of(1, 2, 3, 4, 5, 6, 8, 10);
+
+    /** Indexed by depth. */
     private static final String[] STRENGTH_HINTS = {
             "",
             "Depth 1 — beginner, instant moves",
             "Depth 2 — casual, instant moves",
-            "Depth 3 — club player, quick replies",
-            "Depth 4 — strong, under a second per move",
-            "Depth 5 — master, about a second per move",
-            "Depth 6 — expert, a few seconds per move",
+            "Depth 3 — club player, instant moves",
+            "Depth 4 — strong, instant moves",
+            "Depth 5 — stronger, instant moves",
+            "Depth 6 — expert, well under a second per move",
+            "",
+            "Depth 8 — master, under a second per move",
+            "",
+            "Depth 10 — maximum, a few seconds per move",
     };
 
     /**
@@ -137,8 +145,8 @@ public final class StartScreen extends JPanel {
         Segmented<TimeControl> time = new Segmented<>(times,
                 times.stream().map(TimeControl::label).toList(), null, 0);   // untimed by default
 
-        Segmented<Integer> depth = new Segmented<>(
-                List.of(1, 2, 3, 4, 5, 6), List.of("1", "2", "3", "4", "5", "6"), null, 3);
+        Segmented<Integer> depth = new Segmented<>(DEPTHS,
+                DEPTHS.stream().map(String::valueOf).toList(), null, DEPTHS.indexOf(4));
         JLabel strengthHint = label(STRENGTH_HINTS[depth.value()], font(Font.PLAIN, 12f), MUTED);
         depth.onChange(() -> strengthHint.setText(STRENGTH_HINTS[depth.value()]));
 

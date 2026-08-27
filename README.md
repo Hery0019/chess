@@ -108,9 +108,10 @@ java -cp out app.Main
 ```bash
 ./test.sh           # or .\test.ps1 — runs the three runners below, headless
 java -cp out test.PerftTest      # engine acceptance gate: 11 standard perft positions
-java -cp out test.EngineTests    # 77 targeted rule / draw / search / notation / session tests
-java -cp out test.UiTests        # 53 checks: Swing views driven by synthetic mouse events
+java -cp out test.EngineTests    # 83 targeted rule / draw / search / SEE / notation / session tests
+java -cp out test.UiTests        # 66 checks: Swing views driven by synthetic mouse events
 java -cp out test.NetTests       # server + two clients over loopback: pairing, relay, rematch, disconnects
+java -cp out test.Arena [games=40] [movetime=100|depth=4] [a=all] [b=baseline]   # engine vs engine, Elo report (minutes)
 ```
 
 `UiTests` needs no display: it dispatches `MouseEvent`s straight into
@@ -188,6 +189,8 @@ killed.
 | Online: colours by order of HELLO processing, time control from the first arrival | No negotiation round-trip; both clients simply obey `START` | The host cannot choose a colour; a joiner's time setting is ignored |
 | Drag state lives in `BoardPanel` alongside click selection | One `(from, targets)` model serves click-click, drag and premove; a drop is just a click on the target | Board is repainted on every drag event (fine at 8x8 with a single glyph) |
 | Full prior Zobrist hash stored in `Undo` | Unconditional unmake correctness for 8 bytes/ply | None meaningful |
+| Selective search (null move, LMR, futility, SEE) instead of exhaustive alpha-beta | Several times fewer nodes per depth, so 2–3 plies deeper at equal time; every technique measured by `test.Arena` and switchable for re-measurement | Rare misses (zugzwang, quiet sacrifices); more code paths in the hottest function |
+| Mobility in the evaluation | Neutral at 100 ms/move, +89 Elo at 300 ms: the knowledge pays off as the search deepens | Slower evaluation, fewer nodes per second |
 
 ### Search (v2)
 
@@ -210,14 +213,79 @@ killed.
   Zobrist-keyed map at class load (every entry verified legal), probed
   before searching; a random book move gives opening variety at zero cost.
 
+### Search (v3): selectivity, measured
+
+Plain alpha-beta looks at every move to the same depth. v3 keeps that for
+the principal variation and spends less everywhere else, which is what
+lets it search two to three plies deeper in the same time. Each technique
+lives behind a switch in `Search.Options`, and **`test.Arena`** — an
+engine-vs-engine harness that plays feature sets against each other from
+the book openings (each opening twice, colours swapped) and reports the
+result as an Elo difference with a 95% interval — is how every one of
+them earned its place. Measured on a 6-core desktop at 100 ms per move
+(40 games unless noted; brackets are the 95% interval):
+
+| Match | Score | Elo |
+|---|---|---|
+| v3 vs v2 (plain alpha-beta, material + PST) | +33 =5 −2 (88.8%) | **+359** [+248, +596] |
+| v3 vs v3 without PVS and LMR | +25 =10 −5 (75.0%) | +191 [+100, +315] |
+| v3 vs v3 without futility pruning | 60.0% | +70 [−27, +181] |
+| v3 vs v3 without aspiration windows | 58.8% | +61 [−29, +161] |
+| v3 vs v3 without pawn structure / bishop pair / rooks | 56.3% | +44 [−54, +149] |
+| v3 vs v3 without null-move pruning (80 games) | 51.9% | +13 [−52, +79] |
+| v3 vs v3 without mobility (80 games) | 51.2% | +9 [−57, +75] |
+| v3 vs v3 without mobility, at 300 ms per move | 62.5% | +89 [−6, +198] |
+| v3 vs v3 without SEE in quiescence (60 games) | 51.7% | +12 [−61, +85] |
+
+The combined gain is unambiguous. A single technique is worth tens of Elo,
+which 40–80 games cannot separate from noise, so the rows below the first
+show a sign and an interval, not a verdict. One idea was measured and
+dropped: demoting SEE-losing captures below the quiet moves in the move
+ordering (−17 [−96, +59] over 60 games — the exchange scan at every node
+cost more than the ordering saved). At fixed depth the picture is simpler:
+v3 reaches depth 10 in 0.4–2.8 s on typical middlegames, where v2 needed
+8 s for depth 7.
+
+- **Principal variation search.** After the first move of a node the rest
+  are searched with a null window (alpha, alpha + 1): a cheap proof that
+  they are not better. Only a move that fails that proof is re-searched
+  with the full window.
+- **Null-move pruning.** If passing the turn at reduced depth (R = 2, 3
+  from depth 6) still scores above beta, the node is cut. Never in check,
+  never near mate scores, never without non-pawn material (zugzwang).
+- **Late move reductions.** Quiet moves late in the order are searched at
+  reduced depth (log formula in depth and move number); any that beats
+  alpha gets its full-depth search back.
+- **Futility pruning** at depth 1–2 skips quiet, non-checking moves when
+  the static evaluation plus a margin cannot reach alpha; **reverse
+  futility** returns early from a node whose evaluation beats beta by a
+  depth-scaled margin.
+- **Aspiration windows.** From depth 4 each iteration starts ±30 cp around
+  the previous score and widens on failure, so most iterations search a
+  much narrower tree.
+- **Static exchange evaluation** (`StaticExchange`, with x-ray attackers):
+  captures that lose material are not tried in quiescence; **delta
+  pruning** drops captures that cannot bring the score back to alpha.
+  Mate-distance pruning and a history malus for quiet moves that failed to
+  cut complete the picture.
+- **Evaluation** is now fully tapered (every term has a middlegame and an
+  endgame value blended by remaining material) and knows about passed,
+  isolated and doubled pawns, the bishop pair, rooks on open / half-open
+  files and the seventh rank, and piece mobility (squares not covered by
+  enemy pawns). Mobility was left out of v2 as too costly for the hottest
+  function; the arena shows it paying off as the time per move grows.
+
 ## Known limitations
 
 1. **En-passant file is hashed whenever set**, even if no ep capture is
    actually legal — repetition detection is conservative (may detect one
    occurrence late; never declares falsely).
 2. **Search is single-threaded** by design (correctness first).
-3. **No null-move pruning / aspiration windows** — deliberately left out
-   until an engine-vs-engine harness exists to measure them.
+3. **The search is selective**: null-move pruning, reductions and futility
+   margins can overlook a deep zugzwang or a quiet sacrifice that plain
+   alpha-beta at the same depth would see. Accepted because the depth they
+   buy wins far more games than those misses lose — that is what
+   `test.Arena` is for, and every technique can be switched off there.
 4. **Online play is unencrypted and unauthenticated**; clocks are not
    latency-compensated; there is no takeback, chat or reconnection to a
    game in progress (a dropped connection forfeits or aborts the game).
