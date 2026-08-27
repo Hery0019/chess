@@ -45,15 +45,17 @@ import static engine.Pieces.*;
  * </ul>
  *
  * <h2>Premoves</h2>
- * While the opponent (AI) is thinking, the human may pre-enter their reply:
+ * While the opponent (AI) is thinking, the human may pre-enter replies:
  * select an own piece and pick any square the piece could reach on an empty
  * board (blockers ignored — the position will change before the move is
- * played). The premove is shown as a red highlight with the piece ghosted on
- * its destination. When the human's turn arrives, {@link GamePanel} calls
- * {@link #consumePremove()}: if a legal move matches the from/to pair it is
- * played instantly (promotion defaults to a queen), otherwise the premove is
- * silently dropped. One premove is held at a time; any click on the board
- * cancels it (a right-click cancels without selecting anything).
+ * played). Several premoves can be queued; each later one is entered on the
+ * board as it will look once the earlier ones are played (the pieces are
+ * painted there, the squares highlighted in red). When the human's turn
+ * arrives, {@link GamePanel} calls {@link #consumePremove()}: if a legal
+ * move matches the first queued pair it is played (promotion defaults to a
+ * queen) and the rest waits for the next turn; otherwise the whole queue is
+ * silently dropped. While waiting, clicking anything that is neither an own
+ * piece nor a destination clears the queue; a right-click clears it too.
  *
  * <h2>Annotations</h2>
  * Right-click a square to highlight it, right-drag between two squares to
@@ -110,8 +112,8 @@ public final class BoardPanel extends JPanel {
     private boolean dragging = false; // true once the cursor left the press point
     private Point pressPoint, dragPoint;
 
-    // ---- premove ----
-    private int premoveFrom = -1, premoveTo = -1;
+    // ---- premoves: a queue of {from, to}, played one per turn ----
+    private final List<int[]> premoves = new ArrayList<>();
 
     // ---- annotations (right-click) ----
     private static final Color MARK = new Color(0xEB, 0x61, 0x50, 170);
@@ -250,35 +252,73 @@ public final class BoardPanel extends JPanel {
 
     // ---- premove API (used by GamePanel) ----
 
-    public boolean hasPremove() { return premoveFrom >= 0; }
+    public boolean hasPremove() { return !premoves.isEmpty(); }
 
-    /** e.g. {@code e2e4}; null when no premove is held. */
+    public int premoveCount() { return premoves.size(); }
+
+    /** The queue as {@code e2e4 g1f3 ...}; null when empty. */
     public String premoveText() {
-        return hasPremove() ? Move.squareName(premoveFrom) + Move.squareName(premoveTo) : null;
+        if (premoves.isEmpty()) return null;
+        StringBuilder sb = new StringBuilder();
+        for (int[] pm : premoves) {
+            if (sb.length() > 0) sb.append(' ');
+            sb.append(Move.squareName(pm[0])).append(Move.squareName(pm[1]));
+        }
+        return sb.toString();
     }
 
+    /** Drops every queued premove. */
     public void cancelPremove() {
-        premoveFrom = premoveTo = -1;
+        premoves.clear();
         repaint();
     }
 
     /**
-     * Removes the held premove and returns the legal move it denotes in the
-     * CURRENT position, or null if it has none (piece captured, square no
-     * longer reachable, would leave the king in check...). Among promotion
-     * candidates the queen is chosen. Never returns an illegal move.
+     * Removes the FIRST queued premove and returns the legal move it denotes
+     * in the CURRENT position, or null if it has none (piece captured,
+     * square no longer reachable, would leave the king in check...) — in
+     * which case the rest of the queue is dropped too, since it was planned
+     * on top of that move. Among promotion candidates the queen is chosen.
+     * Never returns an illegal move.
      */
     public Move consumePremove() {
-        int from = premoveFrom, to = premoveTo;
-        premoveFrom = premoveTo = -1;
-        if (from < 0) return null;
+        if (premoves.isEmpty()) return null;
+        int[] pm = premoves.remove(0);
         Move best = null;
         for (Move m : session.legalMoves()) {
-            if (m.from() != from || m.to() != to) continue;
+            if (m.from() != pm[0] || m.to() != pm[1]) continue;
             if (best == null || m.promotion() == QUEEN) best = m;
         }
+        if (best == null) premoves.clear();
         repaint();
         return best;
+    }
+
+    /**
+     * The board as it will look once the queued premoves are played, applied
+     * naively (no legality, captures overwrite, castling hops the rook,
+     * pawns reaching the last rank become queens). Later premoves are
+     * selected and validated against this picture; a premove whose piece is
+     * gone is skipped here and will fail on consumption.
+     */
+    private int[] virtualSquares() {
+        int[] sq = new int[64];
+        for (int i = 0; i < 64; i++) sq[i] = session.board().pieceAt(i);
+        for (int[] pm : premoves) {
+            int p = sq[pm[0]];
+            if (p == EMPTY || colorOf(p) != humanColor) continue;
+            sq[pm[0]] = EMPTY;
+            int type = typeOf(p);
+            if (type == PAWN && ((pm[1] >>> 3) == 0 || (pm[1] >>> 3) == 7)) p = Pieces.make(QUEEN, humanColor);
+            sq[pm[1]] = p;
+            if (type == KING && Math.abs(pm[1] - pm[0]) == 2) {
+                int rookFrom = pm[1] > pm[0] ? pm[0] + 3 : pm[0] - 4;
+                int rookTo = pm[1] > pm[0] ? pm[0] + 1 : pm[0] - 1;
+                sq[rookTo] = sq[rookFrom];
+                sq[rookFrom] = EMPTY;
+            }
+        }
+        return sq;
     }
 
     // ---- input ----
@@ -296,7 +336,7 @@ public final class BoardPanel extends JPanel {
     }
 
     private boolean isOwnPiece(int sq, InputMode mode) {
-        int p = session.board().pieceAt(sq);
+        int p = mode == InputMode.PREMOVE ? virtualSquares()[sq] : session.board().pieceAt(sq);
         return p != EMPTY && colorOf(p) == ownColor(mode);
     }
 
@@ -333,16 +373,18 @@ public final class BoardPanel extends JPanel {
         int sq = squareAt(e.getX(), e.getY());
         if (sq < 0) return;
 
-        // chess.com semantics: any left-click on the board cancels a pending
-        // premove, and the click then proceeds normally (so clicking a piece
-        // both cancels and re-selects in one go).
-        if (hasPremove()) cancelPremove();
+        // On our own turn any left-click drops premoves that are still queued
+        // (the click is a manual move); while waiting, a click on an own piece
+        // or a destination extends the queue and a click elsewhere clears it.
+        if (hasPremove() && mode == InputMode.MOVE) cancelPremove();
 
         // A press on a highlighted destination completes the move (click-click).
         if (selectedSquare >= 0 && targetAt(sq) != null) {
             commitMove(selectedSquare, sq, mode, false);
             return;
         }
+
+        if (hasPremove() && !isOwnPiece(sq, mode)) cancelPremove();
 
         // Otherwise (re)select an own piece and arm a potential drag.
         if (isOwnPiece(sq, mode)) {
@@ -446,8 +488,7 @@ public final class BoardPanel extends JPanel {
     private void commitMove(int from, int to, InputMode mode, boolean dropped) {
         clearSelection();
         if (mode == InputMode.PREMOVE) {
-            premoveFrom = from;
-            premoveTo = to;
+            premoves.add(new int[]{from, to});
             repaint();
             return;
         }
@@ -535,7 +576,8 @@ public final class BoardPanel extends JPanel {
      */
     private List<Target> premoveTargets(int from) {
         Board b = session.board();
-        int p = b.pieceAt(from);
+        int[] v = virtualSquares();
+        int p = v[from];
         int c = colorOf(p);
         int r = from >>> 3, f = from & 7;
         List<Integer> squares = new ArrayList<>();
@@ -564,7 +606,7 @@ public final class BoardPanel extends JPanel {
         }
         List<Target> out = new ArrayList<>();
         for (int sq : squares) {
-            int occupant = b.pieceAt(sq);
+            int occupant = v[sq];
             if (occupant != EMPTY && colorOf(occupant) == c) continue;
             out.add(new Target(sq, occupant != EMPTY));
         }
@@ -612,13 +654,6 @@ public final class BoardPanel extends JPanel {
 
     // ---- painting ----
 
-    /** A premove is drawn only while the piece it refers to is still there. */
-    private boolean premoveVisible() {
-        if (!hasPremove()) return false;
-        int p = session.board().pieceAt(premoveFrom);
-        return p != EMPTY && colorOf(p) == humanColor;
-    }
-
     @Override
     protected void paintComponent(Graphics g0) {
         super.paintComponent(g0);
@@ -626,7 +661,8 @@ public final class BoardPanel extends JPanel {
         g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
         g.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_ON);
         int s = squareSize();
-        boolean showPremove = premoveVisible();
+        // With premoves queued the pieces are painted where they will stand.
+        int[] pieces = hasPremove() ? virtualSquares() : null;
 
         for (int sq = 0; sq < 64; sq++) {
             boolean light = (((sq >>> 3) + (sq & 7)) & 1) == 1;
@@ -647,10 +683,10 @@ public final class BoardPanel extends JPanel {
             g.fillRect(xOf(ksq), yOf(ksq), s, s);
         }
 
-        if (showPremove) {
-            g.setColor(PREMOVE);
-            g.fillRect(xOf(premoveFrom), yOf(premoveFrom), s, s);
-            g.fillRect(xOf(premoveTo), yOf(premoveTo), s, s);
+        g.setColor(PREMOVE);
+        for (int[] pm : premoves) {
+            g.fillRect(xOf(pm[0]), yOf(pm[0]), s, s);
+            g.fillRect(xOf(pm[1]), yOf(pm[1]), s, s);
         }
 
         if (selectedSquare >= 0) {
@@ -676,10 +712,9 @@ public final class BoardPanel extends JPanel {
         int rookTo = anim != null && anim.isCastle() ? (anim.to() > anim.from() ? anim.from() + 1 : anim.from() - 1) : -1;
 
         for (int sq = 0; sq < 64; sq++) {
-            int p = session.board().pieceAt(sq);
+            int p = pieces != null ? pieces[sq] : session.board().pieceAt(sq);
             if (p == EMPTY) continue;
             if (dragging && sq == dragSquare) continue;                              // in the air
-            if (showPremove && (sq == premoveFrom || sq == premoveTo)) continue;    // ghosted below
             if (sq == animTo || sq == rookTo) continue;                              // sliding below
             renderer.draw(g, p, xOf(sq), yOf(sq), s);
         }
@@ -687,11 +722,6 @@ public final class BoardPanel extends JPanel {
             double t = animationProgress();
             drawSliding(g, anim.from(), anim.to(), t, s);
             if (rookTo >= 0) drawSliding(g, anim.to() > anim.from() ? anim.from() + 3 : anim.from() - 4, rookTo, t, s);
-        }
-        if (showPremove) {
-            // Ghost: the premoved piece is shown on its destination (the
-            // occupant there, if any, is hidden — it would be captured).
-            renderer.draw(g, session.board().pieceAt(premoveFrom), xOf(premoveTo), yOf(premoveTo), s);
         }
 
         for (int[] a : arrows) drawArrow(g, a[0], a[1], s);
@@ -711,7 +741,7 @@ public final class BoardPanel extends JPanel {
 
         // The lifted piece rides under the cursor, on top of everything.
         if (dragging) {
-            int p = session.board().pieceAt(dragSquare);
+            int p = pieces != null ? pieces[dragSquare] : session.board().pieceAt(dragSquare);
             if (p != EMPTY) {
                 int size = s + s / 8;
                 renderer.draw(g, p, dragPoint.x - size / 2, dragPoint.y - size / 2, size);

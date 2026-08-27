@@ -13,12 +13,13 @@ quiescence search. Java 21, zero external dependencies.
 - **Premoves (chess.com style).** While the AI is thinking you can already
   enter your reply: pick one of your pieces and choose any square it could
   reach on an empty board (blockers are ignored — the position will change).
-  The premove is highlighted in red with the piece ghosted on its destination
-  and echoed in the status line. As soon as it is your turn the premove is
-  played instantly if it is legal in the new position (promotions default to
-  a queen), otherwise it is silently dropped. Any left-click on the board
-  cancels a pending premove (and may start a new one); right-click cancels
-  without selecting. One premove is held at a time.
+  Premoves are highlighted in red, the pieces are painted where they will
+  stand, and the queue is echoed in the status line. Several can be queued:
+  each later one is entered on the board as it will look after the earlier
+  ones. As soon as it is your turn the first premove is played if it is
+  legal in the new position (promotions default to a queen); if it is not,
+  the whole queue is dropped. While waiting, clicking anything that is not
+  an own piece or a destination clears the queue; right-click clears it too.
 - **Right-click** highlights a square, **right-drag** draws an arrow (again
   to remove); any left-click or move clears them.
 - **Promotion** opens a strip of four pieces on the board starting at the
@@ -119,7 +120,7 @@ worker harmless. The 100 ms UI timer is a *sampler* only: the clock is
 | No mobility term | Requires movegen inside the hottest function; poor value at this depth | Weaker positional play |
 | All draws auto-declared | No claim UI; unambiguous verdicts | Diverges from OTB claim rules (accepted spec) |
 | Unicode glyph rendering behind `PieceRenderer` | No binary assets in a source deliverable; font scan + letter fallback | Glyph aesthetics vary by platform; image renderer is a drop-in later |
-| Premove = one (from, to) pair, resolved against the legal list when the turn arrives | Never submits an illegal move; no engine changes; a stale premove simply evaporates | Single premove only (no queue); auto-queen on promotion; played by a one-shot timer after the AI move's slide, re-validated at that moment |
+| Premoves = queue of (from, to) pairs, each resolved against the legal list when its turn arrives | Never submits an illegal move; no engine changes; a stale premove drops the queue | Later premoves are entered on a naively projected board (no legality); auto-queen on promotion; played by a one-shot timer after the AI move's slide |
 | Move animation paints the post-move board with the moving piece interpolated | No intermediate game state, nothing to roll back; a takeback mid-slide just draws the restored board | Captured piece vanishes at the start of the slide rather than on arrival |
 | Drag state lives in `BoardPanel` alongside click selection | One `(from, targets)` model serves click-click, drag and premove; a drop is just a click on the target | Board is repainted on every drag event (fine at 8x8 with a single glyph) |
 | Full prior Zobrist hash stored in `Undo` | Unconditional unmake correctness for 8 bytes/ply | None meaningful |
