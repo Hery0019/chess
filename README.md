@@ -1,8 +1,9 @@
 # Chess — Java Swing, Minimax/Alpha-Beta AI
 
 A complete chess game: Human vs AI and AI vs AI, full FIDE move rules, optional
-chess clocks (or an untimed game), and a fixed-depth negamax (minimax + alpha-beta) engine with
-quiescence search. Java 21, zero external dependencies.
+chess clocks (or an untimed game), and a negamax (minimax + alpha-beta) engine
+with iterative deepening, transposition table, quiescence search and a small
+opening book. Java 21, zero external dependencies.
 
 ## Playing
 
@@ -115,7 +116,7 @@ worker harmless. The 100 ms UI timer is a *sampler* only: the clock is
 | Pseudo-legal gen + make/unmake filter | Provably correct via perft; simplest scheme to verify | ~2x slower than a legal generator with pin detection |
 | Negamax formulation | One code path, half the sign-bug surface; algebraically identical to min/max | Requires symmetric (side-relative) evaluation |
 | Quiescence with in-check evasions | Kills the horizon effect; never stands pat while mated | Extra nodes at the horizon |
-| MVV-LVA + promotions ordering only | Checks-first ordering costs more than it prunes at depth ≤ 5 | Slightly worse cutoff rate |
+| Ordering: TT move, promotions, MVV-LVA captures, killers, history — no checks-first | Checks-first ordering costs more than it prunes at these depths; the check extension covers the tactical need | Slightly worse cutoff rate in check-heavy positions |
 | Tapered king MG/EG tables | A hard phase switch causes eval discontinuities and move flip-flop | A few extra multiplies per eval |
 | No mobility term | Requires movegen inside the hottest function; poor value at this depth | Weaker positional play |
 | All draws auto-declared | No claim UI; unambiguous verdicts | Diverges from OTB claim rules (accepted spec) |
