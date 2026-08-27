@@ -39,6 +39,8 @@ public final class GameSession {
     private final List<Long> keyHistory = new ArrayList<>();
     /** SAN of every move in {@link #history}, computed as each move is applied. */
     private final List<String> sanHistory = new ArrayList<>();
+    /** Undo record of every move in {@link #history}, so moves can be taken back. */
+    private final List<Undo> undos = new ArrayList<>();
     private GameResult result = GameResult.ONGOING;
     private List<Move> cachedLegal;   // invalidated on every applyMove
 
@@ -92,13 +94,41 @@ public final class GameSession {
         if (result.isOver()) throw new IllegalStateException("game is over");
         if (!legalMoves().contains(m)) throw new IllegalArgumentException("illegal move: " + m);
         String san = Notation.san(board, m, legalMoves());   // needs the pre-move position
-        board.makeMove(m, new Undo());   // undo record discarded; session moves are permanent
+        Undo u = new Undo();
+        board.makeMove(m, u);
         history.add(m);
         sanHistory.add(san);
+        undos.add(u);
         cachedLegal = null;
         repetitions.merge(board.zobristKey(), 1, Integer::sum);
         keyHistory.add(board.zobristKey());
         adjudicate();
+    }
+
+    public boolean canUndo() { return !history.isEmpty(); }
+
+    /**
+     * Takes back the last move, restoring the board, the repetition table and
+     * the key history exactly, and re-adjudicates (a game that had ended —
+     * by mate, draw or timeout — becomes ongoing again from the restored
+     * position).
+     * @return the move that was taken back
+     * @throws IllegalStateException if there is no move to take back
+     */
+    public Move undoLastMove() {
+        assert javax.swing.SwingUtilities.isEventDispatchThread() || !isGuiPresent()
+                : "GameSession accessed off the EDT";
+        if (history.isEmpty()) throw new IllegalStateException("nothing to undo");
+        int last = history.size() - 1;
+        repetitions.merge(board.zobristKey(), -1, (a, b) -> a + b <= 0 ? null : a + b);
+        keyHistory.remove(keyHistory.size() - 1);
+        Move m = history.remove(last);
+        board.unmakeMove(m, undos.remove(last));
+        sanHistory.remove(last);
+        cachedLegal = null;
+        result = GameResult.ONGOING;
+        adjudicate();
+        return m;
     }
 
     /**

@@ -10,6 +10,7 @@ import game.GameConfig;
 import game.GameSession;
 import game.Notation;
 
+import javax.swing.AbstractAction;
 import javax.swing.BorderFactory;
 import javax.swing.JButton;
 import javax.swing.JComponent;
@@ -19,6 +20,7 @@ import javax.swing.JOptionPane;
 import javax.swing.JPanel;
 import javax.swing.JScrollPane;
 import javax.swing.JTable;
+import javax.swing.KeyStroke;
 import javax.swing.ListSelectionModel;
 import javax.swing.SwingWorker;
 import javax.swing.Timer;
@@ -30,6 +32,9 @@ import java.awt.Dimension;
 import java.awt.FlowLayout;
 import java.awt.Font;
 import java.awt.GridLayout;
+import java.awt.Toolkit;
+import java.awt.event.ActionEvent;
+import java.awt.event.KeyEvent;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -81,6 +86,7 @@ public final class GamePanel extends JPanel {
     private final JLabel bottomNameLabel = new JLabel();
     private final JLabel statusLabel = new JLabel();
     private final JButton pauseButton = new JButton("Pause");
+    private final JButton undoButton = new JButton("Undo");
     private final MoveTableModel moveModel = new MoveTableModel();
     private final JTable moveTable = new JTable(moveModel);
     private final Timer uiTimer;
@@ -158,8 +164,12 @@ public final class GamePanel extends JPanel {
         moveTable.setDefaultRenderer(Object.class, new MoveCellRenderer());
         JScrollPane scroll = new JScrollPane(moveTable);
 
-        pauseButton.setVisible(config.mode() == GameConfig.Mode.AI_VS_AI);
+        boolean aiVsAi = config.mode() == GameConfig.Mode.AI_VS_AI;
+        pauseButton.setVisible(aiVsAi);
         pauseButton.addActionListener(e -> togglePause());
+        undoButton.setVisible(!aiVsAi);
+        undoButton.setToolTipText("Take back your last move (Ctrl+Z)");
+        undoButton.addActionListener(e -> undo());
         JButton flipBoard = new JButton("Flip Board");
         flipBoard.addActionListener(e -> flipBoard());
         JButton exportPgn = new JButton("Export PGN…");
@@ -168,10 +178,17 @@ public final class GamePanel extends JPanel {
         newGame.addActionListener(e -> onNewGame.run());
 
         JPanel buttons = new JPanel(new GridLayout(0, 2, 6, 6));
+        buttons.add(aiVsAi ? pauseButton : undoButton);
         buttons.add(flipBoard);
-        buttons.add(pauseButton);
         buttons.add(exportPgn);
         buttons.add(newGame);
+
+        // Ctrl+Z anywhere in the window takes back a move.
+        getInputMap(WHEN_IN_FOCUSED_WINDOW).put(
+                KeyStroke.getKeyStroke(KeyEvent.VK_Z, Toolkit.getDefaultToolkit().getMenuShortcutKeyMaskEx()), "undo");
+        getActionMap().put("undo", new AbstractAction() {
+            @Override public void actionPerformed(ActionEvent e) { if (undoButton.isVisible()) undo(); }
+        });
 
         side.add(title, BorderLayout.NORTH);
         side.add(scroll, BorderLayout.CENTER);
@@ -258,6 +275,45 @@ public final class GamePanel extends JPanel {
         boardPanel.setInteractionEnabled(false);
         // The timer keeps running only to no purpose; stop it.
         uiTimer.stop();
+    }
+
+    /** Number of plies a takeback removes right now, 0 when nothing can be taken back. */
+    private int undoPlies() {
+        if (config.mode() != GameConfig.Mode.HUMAN_VS_AI) return 0;
+        int n = session.plyCount();
+        boolean humanToMove = session.sideToMove() == config.humanColor();
+        if (humanToMove && !session.result().isOver()) {
+            // Our turn: take back the AI's reply and our move before it.
+            return n >= 2 ? 2 : 0;
+        }
+        // AI to move (thinking, or the game just ended on the AI's or our
+        // move): take back up to and including our last move.
+        int plies = session.sideToMove() == config.humanColor() ? 2 : 1;
+        return n >= plies ? plies : 0;
+    }
+
+    /**
+     * Takeback (Human vs AI only). Cancels a search in progress, removes the
+     * last human move together with the AI reply that followed it (if any),
+     * and resumes the game from the restored position — including a game
+     * that had already ended.
+     */
+    private void undo() {
+        int plies = undoPlies();
+        if (plies == 0) return;
+        if (activeWorker != null) {
+            activeWorker.cancelFlag.set(true);
+            activeWorker = null;
+        }
+        boolean wasOver = session.result().isOver();
+        for (int i = 0; i < plies; i++) session.undoLastMove();
+        boardPanel.cancelPremove();
+        boardPanel.clearSelection();
+        lastAiInfo = null;
+        if (wasOver && !uiTimer.isRunning()) uiTimer.start();
+        clock.startTurn(session.sideToMove());
+        maybeStartAi();
+        refresh();
     }
 
     private void maybeStartAi() {
@@ -362,6 +418,7 @@ public final class GamePanel extends JPanel {
             if (lastAiInfo != null) status += "   ·   AI " + lastAiInfo;
         }
         statusLabel.setText("   " + status);
+        undoButton.setEnabled(undoPlies() > 0);
         syncMoveList();
         boardPanel.repaint();
     }

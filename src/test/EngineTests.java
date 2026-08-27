@@ -35,6 +35,7 @@ public final class EngineTests {
         openingBook();
         sanNotation();
         pgnExport();
+        undoRestoresEverything();
         promotionMovesPresent();
         timeoutAdjudication();
 
@@ -332,6 +333,57 @@ public final class EngineTests {
              && pgn.contains("[Event ") && pgn.contains("[Date "));
         check("pgn: numbered move text", pgn.contains("1. e4 e5 2. Qh5 Nc6 3. Bc4 Nf6"));
         check("pgn: ongoing game ends with *", game.Notation.pgn(new GameSession(), "a", "b").trim().endsWith("*"));
+    }
+
+    private static void undoRestoresEverything() {
+        // Play a line with captures, a castle and recaptures; take
+        // it all back and compare against a fresh session replaying a prefix.
+        String[] line = {"e2e4", "d7d5", "e4d5", "d8d5", "b1c3", "d5a5", "d2d4", "g8f6", "g1f3", "c7c6",
+                         "f1c4", "c8f5", "e1g1", "e7e6", "d4d5", "e6d5", "c3d5", "c6d5", "c4d5"};
+        GameSession s = new GameSession();
+        for (String mv : line) s.applyMove(findMove(s.legalMoves(), mv));
+        int full = s.plyCount();
+        for (int i = 0; i < 6; i++) s.undoLastMove();
+        GameSession replay = new GameSession();
+        for (int i = 0; i < full - 6; i++) replay.applyMove(findMove(replay.legalMoves(), line[i]));
+        check("undo: board, keys and SAN match a fresh replay",
+                s.board().zobristKey() == replay.board().zobristKey()
+                && Zobrist.computeFromScratch(s.board()) == s.board().zobristKey()
+                && s.sanHistory().equals(replay.sanHistory())
+                && java.util.Arrays.equals(s.priorPositionKeys(), replay.priorPositionKeys())
+                && s.legalMoves().equals(replay.legalMoves())
+                && s.board().toString().equals(replay.board().toString()));
+        check("undo: the same moves can be replayed after taking back", replayable(s, line, full - 6));
+
+        // Undo after checkmate makes the game ongoing again.
+        GameSession mate = new GameSession();
+        for (String mv : new String[]{"f2f3", "e7e5", "g2g4", "d8h4"}) mate.applyMove(findMove(mate.legalMoves(), mv));
+        check("undo: game over before takeback", mate.result() == GameResult.BLACK_WINS_MATE);
+        mate.undoLastMove();
+        check("undo: takeback after mate resumes the game",
+                mate.result() == GameResult.ONGOING && mate.plyCount() == 3 && mate.canUndo());
+
+        // Repetition table is unwound: threefold declared, undone, re-declared.
+        GameSession rep = new GameSession();
+        String[] shuffle = {"g1f3", "g8f6", "f3g1", "f6g8", "g1f3", "g8f6", "f3g1", "f6g8"};
+        for (String mv : shuffle) rep.applyMove(findMove(rep.legalMoves(), mv));
+        check("undo: threefold declared", rep.result() == GameResult.DRAW_REPETITION);
+        rep.undoLastMove();
+        check("undo: threefold withdrawn after takeback", rep.result() == GameResult.ONGOING);
+        rep.applyMove(findMove(rep.legalMoves(), "f6g8"));
+        check("undo: threefold declared again on replay", rep.result() == GameResult.DRAW_REPETITION);
+        while (rep.canUndo()) rep.undoLastMove();
+        check("undo: back to the start position",
+                rep.board().zobristKey() == Board.startPosition().zobristKey() && rep.plyCount() == 0);
+    }
+
+    private static boolean replayable(GameSession s, String[] line, int from) {
+        try {
+            for (int i = from; i < line.length; i++) s.applyMove(findMove(s.legalMoves(), line[i]));
+            return true;
+        } catch (RuntimeException | AssertionError e) {
+            return false;
+        }
     }
 
     private static void promotionMovesPresent() {
