@@ -67,9 +67,9 @@ public final class Search {
      * null-window search) and is ignored without it.
      */
     public record Options(boolean pvs, boolean nullMove, boolean lmr, boolean futility, boolean aspiration,
-                          boolean see, boolean pawnStructure, boolean mobility) {
-        public static final Options ALL = new Options(true, true, true, true, true, true, true, true);
-        public static final Options BASELINE = new Options(false, false, false, false, false, false, false, false);
+                          boolean see, boolean pawnStructure, boolean mobility, boolean pesto) {
+        public static final Options ALL = new Options(true, true, true, true, true, true, true, true, true);
+        public static final Options BASELINE = new Options(false, false, false, false, false, false, false, false, false);
     }
 
     public static final int MATE_SCORE = 100_000;
@@ -139,6 +139,7 @@ public final class Search {
     private long nodes;
     private long deadlineNanos;
     private boolean timeAbortAllowed;
+    private volatile java.util.function.Consumer<Result> onIteration;
 
     public Search() { this(20, Options.ALL); }
 
@@ -148,10 +149,17 @@ public final class Search {
     public Search(int ttBits, Options options) {
         this.options = options;
         this.tt = new TranspositionTable(ttBits);
-        this.eval = new Evaluator(options.pawnStructure(), options.mobility());
+        this.eval = new Evaluator(options.pawnStructure(), options.mobility(), options.pesto());
     }
 
     public Options options() { return options; }
+
+    /**
+     * Called on the searching thread after every completed iteration with
+     * that iteration's result (the UCI "info" lines, and the answer to give
+     * when a search is stopped before it returns). Null to disable.
+     */
+    public void setIterationListener(java.util.function.Consumer<Result> listener) { this.onIteration = listener; }
 
     /** Fixed-depth search with no time limit and no game history. */
     public Result findBest(Board board, int depth, AtomicBoolean cancel) {
@@ -212,6 +220,7 @@ public final class Search {
             guess = score;
             long elapsedMs = (System.nanoTime() - start) / 1_000_000L;
             best = new Result(pvTable[0][0], score, nodes, d, principalVariation(), elapsedMs);
+            if (onIteration != null) onIteration.accept(best);
             if (Math.abs(score) > MATE_THRESHOLD) break;              // forced mate found: deeper cannot help
             if (timeMillis > 0 && elapsedMs * 2 >= timeMillis) break; // next iteration would overrun
         }

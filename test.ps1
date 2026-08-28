@@ -4,7 +4,7 @@
 $ErrorActionPreference = 'Stop'
 Set-Location $PSScriptRoot
 
-foreach ($runner in 'test.PerftTest', 'test.EngineTests', 'test.UiTests', 'test.NetTests') {
+foreach ($runner in 'test.PerftTest', 'test.EngineTests', 'test.UiTests', 'test.NetTests', 'test.UciTests') {
     & java -ea "-Djava.awt.headless=true" -cp out $runner
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 }

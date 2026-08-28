@@ -103,14 +103,30 @@ javac --release 21 -d out $(find src -name "*.java")
 java -cp out app.Main
 ```
 
+## UCI (play it in any chess GUI)
+
+```bash
+java -cp chess.jar app.Uci
+```
+
+The engine speaks the Universal Chess Interface, so it can be added to
+Arena, CuteChess, Banksia or a Lichess bot and matched against other
+engines for an absolute Elo figure (`test.Arena` only measures it against
+itself). Supported: `uci`, `isready`, `ucinewgame`, `setoption name
+Hash|OwnBook`, `position startpos|fen … [moves …]`, `go depth|movetime|
+wtime/btime/winc/binc|infinite`, `stop`, `quit`; one `info` line per
+completed iteration. With a clock it spends about 1/30 of the remaining
+time plus half the increment per move.
+
 ## Tests (plain main-class runners — no JUnit, so a bare JDK builds everything)
 
 ```bash
-./test.sh           # or .\test.ps1 — runs the three runners below, headless
+./test.sh           # or .\test.ps1 — runs the five runners below, headless
 java -cp out test.PerftTest      # engine acceptance gate: 11 standard perft positions
 java -cp out test.EngineTests    # 83 targeted rule / draw / search / SEE / notation / session tests
 java -cp out test.UiTests        # 66 checks: Swing views driven by synthetic mouse events
 java -cp out test.NetTests       # server + two clients over loopback: pairing, relay, rematch, disconnects
+java -cp out test.UciTests       # drives app.Uci through a pipe: handshake, searches, stop, book
 java -cp out test.Arena [games=40] [movetime=100|depth=4] [a=all] [b=baseline]   # engine vs engine, Elo report (minutes)
 ```
 
@@ -236,6 +252,7 @@ them earned its place. Measured on a 6-core desktop at 100 ms per move
 | v3 vs v3 without mobility (80 games) | 51.2% | +9 [−57, +75] |
 | v3 vs v3 without mobility, at 300 ms per move | 62.5% | +89 [−6, +198] |
 | v3 vs v3 without SEE in quiescence (60 games) | 51.7% | +12 [−61, +85] |
+| v3 vs v3 with Michniewski tables instead of PeSTO (80 games) | 59.4% | +66 [−4, +142] |
 
 The combined gain is unambiguous. A single technique is worth tens of Elo,
 which 40–80 games cannot separate from noise, so the rows below the first
@@ -268,8 +285,10 @@ v3 reaches depth 10 in 0.4–2.8 s on typical middlegames, where v2 needed
   pruning** drops captures that cannot bring the score back to alpha.
   Mate-distance pruning and a history malus for quiet moves that failed to
   cut complete the picture.
-- **Evaluation** is now fully tapered (every term has a middlegame and an
-  endgame value blended by remaining material) and knows about passed,
+- **Evaluation** uses PeSTO's material values and piece-square tables
+  (Ronald Friederich's public-domain, Texel-tuned set, +66 Elo over the
+  Michniewski tables of v2), is fully tapered (every term has a middlegame
+  and an endgame value blended by remaining material) and knows about passed,
   isolated and doubled pawns, the bishop pair, rooks on open / half-open
   files and the seventh rank, and piece mobility (squares not covered by
   enemy pawns). Mobility was left out of v2 as too costly for the hottest

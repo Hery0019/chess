@@ -10,4 +10,5 @@ java $JAVA_OPTS -cp out test.PerftTest
 java $JAVA_OPTS -cp out test.EngineTests
 java $JAVA_OPTS -cp out test.UiTests
 java $JAVA_OPTS -cp out test.NetTests
+java $JAVA_OPTS -cp out test.UciTests
 echo "All test runners passed."
