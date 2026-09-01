@@ -6,6 +6,7 @@ import engine.MoveGenerator;
 import engine.OpeningBook;
 import engine.Pieces;
 import engine.Search;
+import engine.Skill;
 
 import java.io.BufferedReader;
 import java.io.InputStreamReader;
@@ -25,7 +26,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * <pre>java -cp chess.jar app.Uci</pre>
  *
  * Supported: {@code uci}, {@code isready}, {@code ucinewgame},
- * {@code setoption name Hash|OwnBook}, {@code position startpos|fen ...
+ * {@code setoption name Hash|OwnBook|Skill Level}, {@code position startpos|fen ...
  * [moves ...]}, {@code go [depth N] [movetime MS] [wtime MS] [btime MS]
  * [winc MS] [binc MS] [infinite]}, {@code stop}, {@code quit}. Searches run
  * on their own thread so {@code stop} is honoured; each completed iteration
@@ -44,6 +45,7 @@ public final class Uci {
 
     private int hashMb = 16;
     private boolean ownBook = true;
+    private int skill = Skill.MAX;
     private Search search = new Search(bitsFor(16));
     private Board board = Board.startPosition();
     private long[] priorKeys = new long[0];
@@ -74,6 +76,7 @@ public final class Uci {
                     send("id author Hery");
                     send("option name Hash type spin default 16 min 1 max 1024");
                     send("option name OwnBook type check default true");
+                    send("option name Skill Level type spin default " + Skill.MAX + " min " + Skill.MIN + " max " + Skill.MAX);
                     send("uciok");
                 }
                 case "isready" -> send("readyok");
@@ -97,11 +100,16 @@ public final class Uci {
     // ---- options ----
 
     private void setOption(String[] t) {
-        String name = null, value = null;
+        // "setoption name <words...> value <words...>": option names may contain spaces.
+        StringBuilder nameBuf = new StringBuilder(), valueBuf = new StringBuilder();
+        StringBuilder current = null;
         for (int i = 1; i < t.length; i++) {
-            if (t[i].equals("name") && i + 1 < t.length) name = t[++i];
-            else if (t[i].equals("value") && i + 1 < t.length) value = t[++i];
+            if (t[i].equals("name")) current = nameBuf;
+            else if (t[i].equals("value")) current = valueBuf;
+            else if (current != null) current.append(current.length() == 0 ? "" : " ").append(t[i]);
         }
+        String name = nameBuf.length() == 0 ? null : nameBuf.toString();
+        String value = valueBuf.length() == 0 ? null : valueBuf.toString();
         if (name == null || value == null) return;
         switch (name.toLowerCase(Locale.ROOT)) {
             case "hash" -> {
@@ -110,6 +118,9 @@ public final class Uci {
                 search = new Search(bitsFor(hashMb));
             }
             case "ownbook" -> ownBook = Boolean.parseBoolean(value);
+            case "skill level" -> {
+                try { skill = Math.max(Skill.MIN, Math.min(Skill.MAX, Integer.parseInt(value))); } catch (NumberFormatException ignored) { }
+            }
             default -> { }
         }
     }
@@ -206,7 +217,7 @@ public final class Uci {
     }
 
     private void think(Board b, long[] keys, int depth, long budget, AtomicBoolean flag) {
-        Move book = ownBook ? OpeningBook.probe(b) : null;
+        Move book = ownBook && Skill.level(skill).book() ? OpeningBook.probe(b) : null;
         if (book != null) {
             send("info depth 0 score cp 0 nodes 0 time 0 pv " + book + " string book move");
             send("bestmove " + book);
@@ -219,7 +230,8 @@ public final class Uci {
         });
         Search.Result r;
         try {
-            r = search.findBest(b, depth, budget, keys, flag);
+            r = skill == Skill.MAX ? search.findBest(b, depth, budget, keys, flag)
+                                   : Skill.choose(search, skill, b, budget, keys, flag);
         } finally {
             search.setIterationListener(null);
         }

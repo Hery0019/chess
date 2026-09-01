@@ -9,7 +9,7 @@ opening book. Java 21, zero external dependencies.
 ## Screenshots
 
 <p align="center">
-  <img src="docs/start.png" width="440" alt="Start screen: mode, side, time control and AI strength as segmented controls">
+  <img src="docs/start.png" width="440" alt="Start screen: mode, side, time control, AI strength in Elo and Undo settings as segmented controls">
   <img src="docs/game.png" width="440" alt="A game against the AI: board, clocks, move list in SAN and the controls">
 </p>
 <p align="center">
@@ -60,6 +60,44 @@ opening book. Java 21, zero external dependencies.
 - Window placement, the sound switch and the last start-screen settings
   are remembered between runs (`java.util.prefs`).
 - **Flip Board** rotates the view; **New Game** returns to the start screen.
+- **AI strength** is chosen as an Elo figure, 500 to 2000 in eight levels —
+  see [AI levels](#ai-levels-approximate-elo).
+
+## AI levels (approximate Elo)
+
+The start screen picks the AI strength as an Elo figure. Each level is a
+search depth plus, for the weaker ones, *evaluation noise*: every legal
+move is scored exactly at that depth, Gaussian noise is added to each
+score and the noisy maximum is played. The engine still prefers good moves
+but misjudges regularly, and once the noise is comparable to a piece value
+it hangs material the way a beginner does — a far more natural weakness
+than a shallow-but-exact search, which never blunders a piece and only
+loses in the long run. Levels without noise are the full engine at a
+depth cap (`engine.Skill`).
+
+| Level | Elo | Depth | Noise (cp) | Book | Plays like | Measured ACPL → Elo |
+|---|---|---|---|---|---|---|
+| 1 | 500 | 1 | 260 | – | just learning: hangs pieces | 140 cp → ~590 |
+| 2 | 700 | 1 | 185 | – | beginner | 122 cp → ~720 |
+| 3 | 900 | 2 | 165 | – | casual player | 91 cp → ~1010 |
+| 4 | 1100 | 3 | 125 | yes | improving | 77 cp → ~1180 |
+| 5 | 1300 | 3 | 110 | yes | club player (default) | 71 cp → ~1270 |
+| 6 | 1500 | 4 | 85 | yes | strong club player | 56 cp → ~1500 |
+| 7 | 1750 | 7 | 0 | yes | expert | estimate |
+| 8 | 2000 | 10 | 0 | yes | maximum strength | estimate |
+
+How the labels were set: head-to-head self-play is useless here (between
+two blunder-prone players the one who blunders half as often wins nearly
+every game, which reads as 400+ Elo for a fraction of that), so
+`test.Calibrate` measures each level the way rating sites judge humans —
+its **average centipawn loss per move** (ACPL) over self-play games, every
+move judged by the full engine at depth 8 — and converts it with a curve
+fitted to published Lichess statistics (about 110 cp at 800, 65 at 1400,
+34 at 2000: `Elo ≈ 2000 − 1000·ln(ACPL / 34)`). The noise of levels 1–6
+was tuned until the measured figure landed on the label (last column;
+±100 is the precision this claims). The judge cannot rate levels 7 and 8
+(it is the same engine at a similar depth), so those two are estimates of
+where a depth-7 / depth-10 engine of this kind lands against humans.
 
 ## Online 1 v 1 (two PCs, Java sockets)
 
@@ -128,6 +166,7 @@ java -cp out test.UiTests        # 66 checks: Swing views driven by synthetic mo
 java -cp out test.NetTests       # server + two clients over loopback: pairing, relay, rematch, disconnects
 java -cp out test.UciTests       # drives app.Uci through a pipe: handshake, searches, stop, book
 java -cp out test.Arena [games=40] [movetime=100|depth=4] [a=all] [b=baseline]   # engine vs engine, Elo report (minutes)
+java -cp out test.Calibrate [levels=1-6] [games=8] [depth=8]                     # ACPL of each strength level -> Elo (minutes)
 ```
 
 `UiTests` needs no display: it dispatches `MouseEvent`s straight into

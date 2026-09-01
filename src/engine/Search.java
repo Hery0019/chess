@@ -186,20 +186,8 @@ public final class Search {
                                         long[] priorKeys, AtomicBoolean cancel) {
         if (maxDepth < 1) throw new IllegalArgumentException("depth >= 1 required");
         Board b = board.copy();
-        this.cancel = cancel;
-        this.nodes = 0;
         long start = System.nanoTime();
-        this.deadlineNanos = timeMillis > 0 ? start + timeMillis * 1_000_000L : Long.MAX_VALUE;
-
-        int n = priorKeys == null ? 0 : priorKeys.length;
-        if (keyStack.length < n + MAX_PLY + 2) keyStack = new long[n + MAX_PLY + 2];
-        if (n > 0) System.arraycopy(priorKeys, 0, keyStack, 0, n);
-        rootIndex = n;
-        keyStack[rootIndex] = b.zobristKey();
-
-        tt.newSearch();
-        for (Move[] k : killers) { k[0] = null; k[1] = null; }
-        for (int[] h : history) Arrays.fill(h, 0);
+        prepare(b, priorKeys, cancel, timeMillis > 0 ? start + timeMillis * 1_000_000L : Long.MAX_VALUE);
 
         List<Move> rootMoves = gen.generateLegal(b);
         if (rootMoves.isEmpty()) {
@@ -226,6 +214,60 @@ public final class Search {
         }
         if (cancel != null && cancel.get()) return null;
         return best;
+    }
+
+    /** Exact score of one root move at a fixed depth; see {@link #scoreRootMoves}. */
+    public record RootScore(Move move, int score) {}
+
+    /**
+     * Scores every legal move at exactly {@code depth} plies with a full
+     * window — no time limit, no pruning between root moves — so the
+     * caller sees how good each move really is, not just which one is best.
+     * {@link Skill} builds its weaker levels on this list.
+     *
+     * @return one entry per legal move (empty on a terminal position), or
+     *         null when cancelled
+     */
+    public synchronized List<RootScore> scoreRootMoves(Board board, int depth, long[] priorKeys, AtomicBoolean cancel) {
+        if (depth < 1) throw new IllegalArgumentException("depth >= 1 required");
+        Board b = board.copy();
+        prepare(b, priorKeys, cancel, Long.MAX_VALUE);
+        timeAbortAllowed = false;
+        List<RootScore> out = new ArrayList<>();
+        Undo u = new Undo();
+        try {
+            for (Move m : gen.generateLegal(b)) {
+                b.makeMove(m, u);
+                keyStack[rootIndex + 1] = b.zobristKey();
+                int score = -negamax(b, depth - 1, -INFINITY, INFINITY, 1, true);
+                b.unmakeMove(m, u);
+                out.add(new RootScore(m, score));
+            }
+        } catch (Cancelled c) {
+            return null;
+        }
+        if (cancel != null && cancel.get()) return null;   // same contract as findBest: a cancelled call yields nothing
+        return out;
+    }
+
+    /** Nodes searched by the last call (for reporting). */
+    public long lastNodes() { return nodes; }
+
+    /** Per-call state: cancellation, deadline, repetition stack, fresh killers / history, aged table. */
+    private void prepare(Board b, long[] priorKeys, AtomicBoolean cancel, long deadlineNanos) {
+        this.cancel = cancel;
+        this.nodes = 0;
+        this.deadlineNanos = deadlineNanos;
+
+        int n = priorKeys == null ? 0 : priorKeys.length;
+        if (keyStack.length < n + MAX_PLY + 2) keyStack = new long[n + MAX_PLY + 2];
+        if (n > 0) System.arraycopy(priorKeys, 0, keyStack, 0, n);
+        rootIndex = n;
+        keyStack[rootIndex] = b.zobristKey();
+
+        tt.newSearch();
+        for (Move[] k : killers) { k[0] = null; k[1] = null; }
+        for (int[] h : history) Arrays.fill(h, 0);
     }
 
     // ---- root ----
