@@ -1,0 +1,348 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Chess — play in your browser</title>
+<style>
+  :root {
+    --bg-top: #3b342e; --bg-bottom: #1b1816; --card: #f8f3ea; --edge: #d6c8b2;
+    --text: #2b2520; --muted: #84776a; --light: #f0d9b5; --dark: #b58863;
+    --sel: rgba(255, 220, 80, .75); --last: rgba(255, 226, 120, .45); --dot: rgba(40, 30, 20, .35);
+    --green: #81b64c; --green-down: #5e8c33;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; min-height: 100%; }
+  body {
+    font-family: "Segoe UI", system-ui, -apple-system, Roboto, sans-serif; color: var(--text);
+    background: linear-gradient(var(--bg-top), var(--bg-bottom)) fixed; min-height: 100vh;
+    display: flex; align-items: center; justify-content: center; padding: 12px;
+  }
+  .card { background: var(--card); border: 1px solid var(--edge); border-radius: 22px; padding: 24px 28px;
+          box-shadow: 0 12px 30px rgba(0,0,0,.35); }
+  h1 { margin: 0 0 4px; font-size: 30px; }
+  .sub { color: var(--muted); font-size: 13px; margin-bottom: 18px; }
+  label { display: block; font-size: 11px; letter-spacing: .1em; text-transform: uppercase; color: var(--muted); margin: 14px 0 6px; }
+  input { font: inherit; font-size: 15px; width: 100%; padding: 9px 10px; border: 1px solid var(--edge); border-radius: 8px; background: #fff; }
+  button { font: inherit; font-weight: 600; padding: 9px 14px; border: 0; border-radius: 10px; cursor: pointer;
+           background: #e9e0d0; color: var(--text); }
+  button:hover { background: #dbceb9; }
+  button.primary { background: var(--green); color: #fff; width: 100%; font-size: 17px; padding: 12px; margin-top: 18px;
+                   box-shadow: 0 3px 0 var(--green-down); }
+  button.primary:hover { background: #6fa23f; }
+  button.danger { background: #d9534f; color: #fff; }
+  button[hidden] { display: none; }
+  .status { min-height: 1.4em; margin-top: 12px; font-size: 14px; }
+  .error { color: #b3261e; }
+
+  /* ---- game ---- */
+  #game { display: none; gap: 18px; align-items: stretch; }
+  #game.on { display: flex; }
+  .boardCol { display: flex; flex-direction: column; gap: 6px; }
+  .player { display: flex; justify-content: space-between; align-items: baseline; font-size: 15px; padding: 0 2px; }
+  .player .clock { font-family: ui-monospace, Consolas, monospace; font-size: 22px; font-weight: 700; }
+  .player.active .clock { color: #1a7f37; }
+  #board { display: grid; grid-template-columns: repeat(8, 1fr); grid-template-rows: repeat(8, 1fr);
+           width: min(92vw, 62vh, 560px); aspect-ratio: 1; border: 2px solid var(--edge); border-radius: 6px;
+           overflow: hidden; user-select: none; touch-action: manipulation; }
+  .sq { position: relative; display: flex; align-items: center; justify-content: center; cursor: pointer; }
+  .sq.light { background: var(--light); } .sq.dark { background: var(--dark); }
+  .sq.last { box-shadow: inset 0 0 0 100px var(--last); }
+  .sq.sel { box-shadow: inset 0 0 0 100px var(--sel); }
+  .sq.target::after { content: ""; width: 26%; height: 26%; border-radius: 50%; background: var(--dot); }
+  .sq.target.capture::after { width: 88%; height: 88%; background: none; border: 5px solid var(--dot); }
+  .sq .coord { position: absolute; font-size: 10px; font-weight: 700; opacity: .7; }
+  .sq .file { right: 3px; bottom: 1px; } .sq .rank { left: 3px; top: 1px; }
+  .sq .piece { font-size: min(9vw, 6vh, 54px); line-height: 1; pointer-events: none; }
+  .piece.w { color: #fbf6ee; text-shadow: 0 0 2px #000, 0 0 2px #000, 1px 1px 0 #2b2520; }
+  .piece.b { color: #1f1a16; text-shadow: 0 0 2px #fff8; }
+  .side { display: flex; flex-direction: column; min-width: 220px; max-width: 300px; }
+  .side h2 { font-size: 15px; margin: 0 0 6px; }
+  #moves { flex: 1; min-height: 120px; max-height: 40vh; overflow-y: auto; margin: 0; padding: 6px 8px; background: #fff; border: 1px solid var(--edge); border-radius: 8px;
+           font-family: ui-monospace, Consolas, monospace; font-size: 13px; list-style: none; }
+  #moves li { display: grid; grid-template-columns: 2.2em 1fr 1fr; padding: 1px 0; }
+  #moves li:last-child { font-weight: 700; }
+  .buttons { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 10px; }
+  .buttons button { padding: 8px 6px; font-size: 13px; }
+  #promo { position: fixed; inset: 0; display: none; align-items: center; justify-content: center; background: rgba(0,0,0,.45); }
+  #promo.on { display: flex; }
+  #promo div { background: var(--card); padding: 14px; border-radius: 14px; display: flex; gap: 10px; }
+  #promo button { font-size: 40px; line-height: 1; padding: 6px 12px; }
+  @media (max-width: 760px) {
+    #game.on { flex-direction: column; }
+    .side { max-width: none; }
+    .card { padding: 16px; }
+  }
+</style>
+</head>
+<body>
+<div class="card">
+  <div id="join">
+    <h1>Chess</h1>
+    <div class="sub">Play the host of this page — nothing to install.</div>
+    <label for="name">Your name</label>
+    <input id="name" maxlength="16" placeholder="Player" autocomplete="nickname">
+    <button class="primary" id="joinBtn">Join the game</button>
+    <div class="status" id="joinStatus"></div>
+  </div>
+
+  <div id="game">
+    <div class="boardCol">
+      <div class="player" id="oppRow"><span id="oppName"></span><span class="clock" id="oppClock"></span></div>
+      <div id="board"></div>
+      <div class="player" id="meRow"><span id="meName"></span><span class="clock" id="meClock"></span></div>
+    </div>
+    <div class="side">
+      <h2>Moves</h2>
+      <ol id="moves"></ol>
+      <div class="status" id="status"></div>
+      <div class="buttons">
+        <button id="resignBtn" class="danger">Resign</button>
+        <button id="drawBtn">Offer draw</button>
+        <button id="acceptBtn" hidden>Accept draw</button>
+        <button id="declineBtn" hidden>Decline</button>
+        <button id="rematchBtn" hidden>Rematch</button>
+        <button id="leaveBtn" hidden>Leave</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div id="promo"><div>
+  <button data-p="q">♛</button><button data-p="r">♜</button><button data-p="b">♝</button><button data-p="n">♞</button>
+</div></div>
+
+<script>
+(() => {
+  // ---- protocol: the same text lines as the Java app, over a WebSocket ----
+  const $ = id => document.getElementById(id);
+  const FILES = 'abcdefgh';
+  const GLYPH = { k: '♚', q: '♛', r: '♜', b: '♝', n: '♞', p: '♟' };
+  let ws = null, pingTimer = null, clockTimer = null;
+  let me = -1, names = ['', ''], minutes = 0;
+  let board = [], stm = 0, legal = [], selected = -1, lastMove = null, moves = [], over = true;
+  let remaining = [0, 0], lastTick = 0, pendingPromotion = null, rematchAsked = false, opponentGone = false;
+
+  const sqIndex = n => (n.charCodeAt(0) - 97) + 8 * (n.charCodeAt(1) - 49);
+  const isWhite = p => p === p.toUpperCase();
+  const mine = p => p && isWhite(p) === (me === 0);
+
+  function startPosition() {
+    const b = new Array(64).fill(null), back = 'rnbqkbnr';
+    for (let f = 0; f < 8; f++) { b[f] = back[f].toUpperCase(); b[8 + f] = 'P'; b[48 + f] = 'p'; b[56 + f] = back[f]; }
+    return b;
+  }
+
+  function send(line) { if (ws && ws.readyState === 1) ws.send(line); }
+
+  function connect() {
+    const name = ($('name').value.trim() || 'Player').replace(/[^A-Za-z0-9_-]/g, '_').slice(0, 16);
+    const url = (location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/ws';
+    setJoinStatus('Connecting…');
+    $('joinBtn').disabled = true;
+    try { ws = new WebSocket(url); } catch (e) { setJoinStatus('Cannot open a connection: ' + e.message, true); $('joinBtn').disabled = false; return; }
+    ws.onopen = () => {
+      send('HELLO 1 0 ' + name);
+      pingTimer = setInterval(() => send('PING'), 5000);
+    };
+    ws.onmessage = e => handle(String(e.data).trim());
+    ws.onerror = () => setJoinStatus('Connection failed — is the host still on this address?', true);
+    ws.onclose = () => {
+      clearInterval(pingTimer);
+      $('joinBtn').disabled = false;
+      if (!over) gameOver('Connection lost');
+      else if (!$('game').classList.contains('on')) setJoinStatus('Disconnected — try again.', true);
+      $('leaveBtn').hidden = false;
+    };
+  }
+
+  function handle(line) {
+    if (!line) return;
+    const t = line.split(/\s+/), rest = t.slice(1).join(' ');
+    switch (t[0]) {
+      case 'WELCOME': setJoinStatus('Connected — waiting for the other player to start…'); break;
+      case 'START': startGame(t); break;
+      case 'MOVE': applyMove(t[1]); afterMove(); break;
+      case 'LEGAL': legal = t.slice(1); render(); break;
+      case 'RESULT': gameOver(t.slice(2).join(' ')); break;
+      case 'RESIGN': gameOver(names[1 - me] + ' resigned — you win'); break;
+      case 'TIMEOUT': gameOver(names[1 - me] + ' ran out of time — you win'); break;
+      case 'DRAW_OFFER':
+        if (over) break;
+        setStatus(names[1 - me] + ' offers a draw');
+        $('acceptBtn').hidden = false; $('declineBtn').hidden = false;
+        break;
+      case 'DRAW_ACCEPT': gameOver('Draw by agreement'); break;
+      case 'DRAW_DECLINE': setStatus(names[1 - me] + ' declined the draw'); break;
+      case 'REMATCH':
+        setStatus(rematchAsked ? 'Starting the rematch…' : names[1 - me] + ' wants a rematch');
+        break;
+      case 'OPPONENT_LEFT':
+        opponentGone = true;
+        gameOver(names[1 - me] + ' left the game');
+        $('rematchBtn').hidden = true; $('leaveBtn').hidden = false;
+        break;
+      case 'ERROR': setStatus('Error: ' + rest, true); break;
+      case 'PONG': break;
+    }
+  }
+
+  function startGame(t) {
+    me = t[1] === 'WHITE' ? 0 : 1;
+    minutes = parseInt(t[2] || '0', 10) || 0;
+    names = [t[3] || 'White', t[4] || 'Black'];
+    board = startPosition(); stm = 0; legal = []; selected = -1; lastMove = null; moves = [];
+    over = false; rematchAsked = false; opponentGone = false; pendingPromotion = null;
+    remaining = [minutes * 60000, minutes * 60000]; lastTick = performance.now();
+    $('join').style.display = 'none';
+    $('game').classList.add('on');
+    $('meName').textContent = names[me] + ' (you)';
+    $('oppName').textContent = names[1 - me];
+    $('resignBtn').hidden = false; $('drawBtn').hidden = false;
+    $('acceptBtn').hidden = true; $('declineBtn').hidden = true; $('rematchBtn').hidden = true; $('leaveBtn').hidden = true;
+    renderMoves();
+    render();
+    afterMove();
+    if (!clockTimer) clockTimer = setInterval(tick, 100);
+  }
+
+  /** Whose turn is it now: ask for my legal moves, update the status line. */
+  function afterMove() {
+    if (over) return;
+    if (stm === me) { send('LEGAL'); setStatus('Your move'); }
+    else setStatus('Waiting for ' + names[1 - me] + '…');
+    render();
+  }
+
+  /** Applies a long-algebraic move to the local board: castling rook hop, en passant and promotion included. */
+  function applyMove(lan) {
+    const from = sqIndex(lan.slice(0, 2)), to = sqIndex(lan.slice(2, 4)), promo = lan[4];
+    let piece = board[from];
+    if (!piece) return;
+    const type = piece.toLowerCase();
+    if (type === 'k' && Math.abs((to & 7) - (from & 7)) === 2) {          // castling: move the rook too
+      const rank = from & ~7;
+      if (to > from) { board[rank + 5] = board[rank + 7]; board[rank + 7] = null; }
+      else           { board[rank + 3] = board[rank];     board[rank] = null; }
+    }
+    if (type === 'p' && (to & 7) !== (from & 7) && board[to] === null) {   // en passant: the captured pawn sits behind
+      board[to + (isWhite(piece) ? -8 : 8)] = null;
+    }
+    if (promo) piece = isWhite(piece) ? promo.toUpperCase() : promo.toLowerCase();
+    board[to] = piece; board[from] = null;
+    lastMove = [from, to]; moves.push(lan); stm ^= 1; legal = []; selected = -1;
+    lastTick = performance.now();
+    renderMoves();
+    render();
+  }
+
+  function play(lan) { send('MOVE ' + lan); applyMove(lan); afterMove(); }
+
+  function onSquare(i) {
+    if (over || stm !== me) return;
+    if (selected >= 0) {
+      const cands = legal.filter(m => sqIndex(m.slice(0, 2)) === selected && sqIndex(m.slice(2, 4)) === i);
+      if (cands.length === 1) { play(cands[0]); return; }
+      if (cands.length > 1) { pendingPromotion = cands; $('promo').classList.add('on'); return; }
+    }
+    selected = mine(board[i]) && i !== selected ? i : -1;
+    render();
+  }
+
+  // ---- rendering ----
+  function render() {
+    const el = $('board');
+    el.innerHTML = '';
+    const targets = new Set(selected >= 0 ? legal.filter(m => sqIndex(m.slice(0, 2)) === selected).map(m => sqIndex(m.slice(2, 4))) : []);
+    for (let row = 0; row < 8; row++) {
+      for (let col = 0; col < 8; col++) {
+        const rank = me === 1 ? row : 7 - row, file = me === 1 ? 7 - col : col, i = rank * 8 + file;
+        const d = document.createElement('div');
+        d.className = 'sq ' + (((rank + file) & 1) ? 'light' : 'dark');
+        if (lastMove && (lastMove[0] === i || lastMove[1] === i)) d.classList.add('last');
+        if (i === selected) d.classList.add('sel');
+        if (targets.has(i)) { d.classList.add('target'); if (board[i]) d.classList.add('capture'); }
+        if (row === 7) d.insertAdjacentHTML('beforeend', '<span class="coord file">' + FILES[file] + '</span>');
+        if (col === 0) d.insertAdjacentHTML('beforeend', '<span class="coord rank">' + (rank + 1) + '</span>');
+        const p = board[i];
+        if (p) {
+          const s = document.createElement('span');
+          s.className = 'piece ' + (isWhite(p) ? 'w' : 'b');
+          s.textContent = GLYPH[p.toLowerCase()];
+          d.appendChild(s);
+        }
+        d.addEventListener('click', () => onSquare(i));
+        el.appendChild(d);
+      }
+    }
+    $('meRow').classList.toggle('active', !over && stm === me);
+    $('oppRow').classList.toggle('active', !over && stm !== me);
+    renderClocks();
+  }
+
+  function renderMoves() {
+    const ol = $('moves');
+    ol.innerHTML = '';
+    for (let i = 0; i < moves.length; i += 2) {
+      const li = document.createElement('li');
+      li.innerHTML = '<span>' + (i / 2 + 1) + '.</span><span>' + moves[i] + '</span><span>' + (moves[i + 1] || '') + '</span>';
+      ol.appendChild(li);
+    }
+    ol.scrollTop = ol.scrollHeight;
+  }
+
+  function fmt(ms) {
+    if (minutes === 0) return '';
+    const s = Math.max(0, Math.ceil(ms / 1000));
+    return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0');
+  }
+  function renderClocks() { $('meClock').textContent = fmt(remaining[me]); $('oppClock').textContent = fmt(remaining[1 - me]); }
+
+  function tick() {
+    if (over || minutes === 0) return;
+    const now = performance.now();
+    remaining[stm] -= now - lastTick;
+    lastTick = now;
+    if (stm === me && remaining[me] <= 0) {
+      remaining[me] = 0;
+      send('TIMEOUT');                       // each side reports its own flag fall
+      gameOver('You ran out of time — ' + names[1 - me] + ' wins');
+    }
+    renderClocks();
+  }
+
+  function gameOver(text) {
+    over = true; legal = []; selected = -1; pendingPromotion = null;
+    $('promo').classList.remove('on');
+    setStatus(text);
+    $('resignBtn').hidden = true; $('drawBtn').hidden = true; $('acceptBtn').hidden = true; $('declineBtn').hidden = true;
+    $('rematchBtn').hidden = opponentGone || !ws || ws.readyState !== 1;
+    $('leaveBtn').hidden = false;
+    render();
+  }
+
+  function setStatus(text, isError) { const s = $('status'); s.textContent = text; s.classList.toggle('error', !!isError); }
+  function setJoinStatus(text, isError) { const s = $('joinStatus'); s.textContent = text; s.classList.toggle('error', !!isError); }
+
+  // ---- buttons ----
+  $('joinBtn').addEventListener('click', connect);
+  $('name').addEventListener('keydown', e => { if (e.key === 'Enter') connect(); });
+  $('resignBtn').addEventListener('click', () => { if (!over && confirm('Resign this game?')) { send('RESIGN'); gameOver('You resigned — ' + names[1 - me] + ' wins'); } });
+  $('drawBtn').addEventListener('click', () => { if (!over) { send('DRAW_OFFER'); setStatus('Draw offered…'); } });
+  $('acceptBtn').addEventListener('click', () => { send('DRAW_ACCEPT'); gameOver('Draw by agreement'); });
+  $('declineBtn').addEventListener('click', () => { send('DRAW_DECLINE'); $('acceptBtn').hidden = true; $('declineBtn').hidden = true; setStatus('Draw declined'); });
+  $('rematchBtn').addEventListener('click', () => { rematchAsked = true; send('REMATCH'); setStatus('Rematch requested — waiting for ' + names[1 - me] + '…'); $('rematchBtn').hidden = true; });
+  $('leaveBtn').addEventListener('click', () => location.reload());
+  for (const b of $('promo').querySelectorAll('button')) {
+    b.addEventListener('click', () => {
+      const pick = pendingPromotion && pendingPromotion.find(m => m[4] === b.dataset.p);
+      $('promo').classList.remove('on'); pendingPromotion = null;
+      if (pick) play(pick);
+    });
+  }
+  $('promo').addEventListener('click', e => { if (e.target === $('promo')) { $('promo').classList.remove('on'); pendingPromotion = null; } });
+  $('name').focus();
+})();
+</script>
+</body>
+</html>

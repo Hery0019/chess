@@ -28,7 +28,8 @@ final class OnlineLobbyPanel extends JPanel {
 
     private final JLabel title = new JLabel("Online game");
     private final JLabel status = new JLabel(" ");
-    private final JLabel shareLabel = new JLabel("Share one of these addresses with your opponent:");
+    private final JLabel shareLabel = new JLabel("<html><div style=text-align:center>Share one of these addresses with your opponent.<br>"
+            + "In a browser it just works (nothing to install); in this app, Join game with the part after http://</div></html>");
     private final JTextArea addresses = new JTextArea();
 
     OnlineLobbyPanel(Runnable onCancel) {
@@ -63,7 +64,7 @@ final class OnlineLobbyPanel extends JPanel {
 
     void setStatus(String text) { status.setText(text); }
 
-    /** Lists {@code ip:port} lines; hidden when there is nothing to share (joining). */
+    /** Lists {@code http://ip:port} lines (the browser client; the app joins the same ip:port); hidden when joining. */
     void setShareInfo(List<String> hosts, int port) {
         boolean show = port > 0 && !hosts.isEmpty();
         shareLabel.setVisible(show);
@@ -72,7 +73,7 @@ final class OnlineLobbyPanel extends JPanel {
             StringBuilder sb = new StringBuilder();
             for (String h : hosts) {
                 if (sb.length() > 0) sb.append('\n');
-                sb.append(h).append(':').append(port);
+                sb.append("http://").append(h).append(':').append(port);
             }
             addresses.setText(sb.toString());
         }
