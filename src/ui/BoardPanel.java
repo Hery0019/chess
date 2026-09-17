@@ -13,6 +13,7 @@ import java.awt.Color;
 import java.awt.Cursor;
 import java.awt.Dimension;
 import java.awt.Font;
+import java.awt.FontMetrics;
 import java.awt.Graphics;
 import java.awt.Graphics2D;
 import java.awt.Point;
@@ -196,6 +197,36 @@ public final class BoardPanel extends JPanel {
     /** Number of user marks currently drawn (highlighted squares + arrows). */
     public int annotationCount() { return markedSquares.size() + arrows.size(); }
 
+    // ---- game-over banner ----
+
+    private static final Color BANNER_DIM   = new Color(0, 0, 0, 70);
+    private static final Color BANNER_BG    = new Color(0x2B, 0x25, 0x20, 232);
+    private static final Color BANNER_EDGE  = new Color(0xF6, 0xC4, 0x53);
+    private static final Color BANNER_TITLE = new Color(0xF8, 0xF3, 0xEA);
+    private static final Color BANNER_TEXT  = new Color(0xD6, 0xC8, 0xB2);
+    private String bannerTitle, bannerSubtitle;
+
+    /**
+     * Shows a large centred announcement over the board (checkmate, draw,
+     * time out...). It is painted once the current slide has finished and
+     * stays until {@link #clearBanner()} or a click on the board.
+     */
+    public void showBanner(String title, String subtitle) {
+        bannerTitle = title;
+        bannerSubtitle = subtitle;
+        repaint();
+    }
+
+    public void clearBanner() {
+        if (bannerTitle == null) return;
+        bannerTitle = null;
+        bannerSubtitle = null;
+        repaint();
+    }
+
+    /** The banner title currently shown, or null. */
+    public String bannerTitle() { return bannerTitle; }
+
     public void clearAnnotations() {
         markedSquares.clear();
         arrows.clear();
@@ -347,6 +378,11 @@ public final class BoardPanel extends JPanel {
 
     private void onPress(MouseEvent e) {
         InputMode mode = mode();
+        if (bannerTitle != null) {
+            // Any click on the announcement puts it away so the final position can be studied.
+            clearBanner();
+            return;
+        }
         if (SwingUtilities.isRightMouseButton(e)) {
             // Right button: cancel whatever is pending and start an annotation
             // (a mark on release over the same square, an arrow otherwise).
@@ -749,6 +785,45 @@ public final class BoardPanel extends JPanel {
         }
 
         if (promotionChoices != null) paintPromotionStrip(g, s);
+        if (bannerTitle != null && anim == null) paintBanner(g, s);
+    }
+
+    /** Dimmed board, rounded dark box in the middle, big title and a line below. Fits any board size. */
+    private void paintBanner(Graphics2D g, int s) {
+        int board = 8 * s;
+        g.setColor(BANNER_DIM);
+        g.fillRect(0, 0, board, board);
+
+        int maxTextW = board - s;
+        Font titleFont = new Font("Segoe UI", Font.BOLD, Math.max(16, s * 3 / 4));
+        Font subFont = new Font("Segoe UI", Font.PLAIN, Math.max(11, s * 3 / 10));
+        FontMetrics tm = g.getFontMetrics(titleFont);
+        while (tm.stringWidth(bannerTitle) > maxTextW && titleFont.getSize() > 12) {   // long titles shrink to fit
+            titleFont = titleFont.deriveFont((float) titleFont.getSize() - 2);
+            tm = g.getFontMetrics(titleFont);
+        }
+        FontMetrics sm = g.getFontMetrics(subFont);
+        String sub = bannerSubtitle == null ? "" : bannerSubtitle;
+        int textW = Math.max(tm.stringWidth(bannerTitle), sm.stringWidth(sub));
+        int padX = s / 2, padY = s / 4, gap = s / 10;
+        int boxW = Math.min(board - s / 2, textW + 2 * padX);
+        int boxH = tm.getHeight() + (sub.isEmpty() ? 0 : sm.getHeight() + gap) + 2 * padY;
+        int x = (board - boxW) / 2, y = (board - boxH) / 2, arc = s / 2;
+
+        g.setColor(BANNER_BG);
+        g.fillRoundRect(x, y, boxW, boxH, arc, arc);
+        g.setColor(BANNER_EDGE);
+        g.setStroke(new BasicStroke(Math.max(2f, s / 24f)));
+        g.drawRoundRect(x, y, boxW, boxH, arc, arc);
+
+        g.setFont(titleFont);
+        g.setColor(BANNER_TITLE);
+        g.drawString(bannerTitle, (board - tm.stringWidth(bannerTitle)) / 2, y + padY + tm.getAscent());
+        if (!sub.isEmpty()) {
+            g.setFont(subFont);
+            g.setColor(BANNER_TEXT);
+            g.drawString(sub, (board - sm.stringWidth(sub)) / 2, y + padY + tm.getHeight() + gap + sm.getAscent());
+        }
     }
 
     /** Thick translucent arrow between square centres, shortened so the head sits inside the target. */

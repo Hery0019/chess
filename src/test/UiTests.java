@@ -45,6 +45,7 @@ public final class UiTests {
                 boardPaintsInEveryState();
                 startScreenEmitsConfig();
                 gamePanelTakebackLimit();
+                gameOverBanner();
             } catch (Exception e) {
                 e.printStackTrace();
                 failures++;
@@ -457,6 +458,49 @@ public final class UiTests {
         noUndo.startGame();
         check("game: no undo button when takebacks are off", findButtonStartingWith(noUndo, "Undo") == null);
         noUndo.dispose();
+    }
+
+    // ---- game-over banner over the board ----
+
+    private static void gameOverBanner() {
+        // BoardPanel: the announcement paints, and a click puts it away.
+        GameSession session = new GameSession();
+        BoardPanel p = newBoard(session, false, Pieces.WHITE, new ArrayList<>());
+        p.showBanner("CHECKMATE", "White wins");
+        BufferedImage img = new BufferedImage(8 * S, 8 * S, BufferedImage.TYPE_INT_RGB);
+        p.paint(img.getGraphics());
+        check("banner: shown and painted", "CHECKMATE".equals(p.bannerTitle()));
+        click(p, sq("e4"));
+        check("banner: a click on the board dismisses it", p.bannerTitle() == null);
+
+        // GamePanel: a game that ends in mate announces it; a takeback that resumes the game clears it.
+        GamePanel.Host host = new GamePanel.Host() {
+            @Override public void newGame() { }
+            @Override public void startGame(GameConfig config) { }
+        };
+        GameConfig cfg = new GameConfig(GameConfig.Mode.HUMAN_VS_AI, Pieces.WHITE, GameConfig.NO_CLOCK, 1, 3);
+        List<String> foolsMate = List.of("f2f3", "e7e5", "g2g4", "d8h4");
+        GamePanel panel = new GamePanel(cfg, new SavedGame(cfg, foolsMate, 0, 0, 0), host);
+        panel.setSize(900, 700);
+        layoutTree(panel);
+        panel.startGame();
+        List<BoardPanel> boards = new ArrayList<>();
+        collect(panel, BoardPanel.class, boards);
+        check("banner: checkmate announced over the board when the game ends",
+                boards.size() == 1 && "CHECKMATE".equals(boards.get(0).bannerTitle()));
+        panel.paint(new BufferedImage(900, 700, BufferedImage.TYPE_INT_RGB).getGraphics());
+        AbstractButton undo = findButtonStartingWith(panel, "Undo");
+        if (undo != null) undo.doClick();
+        check("banner: taking the mate back clears it", undo != null && boards.get(0).bannerTitle() == null);
+        panel.dispose();
+
+        check("banner: titles by result",
+                "CHECKMATE".equals(GamePanel.bannerFor(game.GameResult.BLACK_WINS_MATE)[0])
+                && "Black wins".equals(GamePanel.bannerFor(game.GameResult.BLACK_WINS_MATE)[1])
+                && "STALEMATE".equals(GamePanel.bannerFor(game.GameResult.DRAW_STALEMATE)[0])
+                && "DRAW".equals(GamePanel.bannerFor(game.GameResult.DRAW_REPETITION)[0])
+                && "Threefold repetition".equals(GamePanel.bannerFor(game.GameResult.DRAW_REPETITION)[1])
+                && "TIME OUT".equals(GamePanel.bannerFor(game.GameResult.WHITE_WINS_TIMEOUT)[0]));
     }
 
     private static <T> void collect(Container root, Class<T> type, List<T> out) {
