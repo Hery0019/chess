@@ -35,6 +35,10 @@ opening book. Java 21, zero external dependencies.
   legal in the new position (promotions default to a queen); if it is not,
   the whole queue is dropped. While waiting, clicking anything that is not
   an own piece or a destination clears the queue; right-click clears it too.
+  **Recapture premoves:** drag a piece onto one of your own pieces to say
+  "if that one gets taken, take back with this" — it is played only when
+  the piece has indeed been captured (a click on an own piece still just
+  re-selects it).
 - **Right-click** highlights a square, **right-drag** draws an arrow (again
   to remove); any left-click or move clears them.
 - **Promotion** opens a strip of four pieces on the board starting at the

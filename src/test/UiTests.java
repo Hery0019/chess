@@ -165,7 +165,7 @@ public final class UiTests {
         check("premove: queue of two", "c4b3 b3d5".equals(p.premoveText()));
         click(p, sq("a1"));
         click(p, sq("a2"));   // own pawn: re-selects a2, queue untouched
-        check("premove: own-piece square is not a target", p.premoveCount() == 2);
+        check("premove: a click on an own piece re-selects it", p.premoveCount() == 2);
         click(p, sq("h2"));
         click(p, sq("h4"));
         check("premove: three queued", "c4b3 b3d5 h2h4".equals(p.premoveText()));
@@ -200,6 +200,39 @@ public final class UiTests {
         session.applyMove(find(session, "c5f2"));   // Bxf2+ — Qe2 no longer legal
         p.setInteractionEnabled(true);
         check("premove: illegal first premove drops the queue", p.consumePremove() == null && !p.hasPremove());
+
+        // Recapture premoves: dragging onto an own piece is allowed; the premove
+        // resolves only if that piece has been taken in the meantime.
+        GameSession rs1 = new GameSession();
+        List<Move> rgot = new ArrayList<>();
+        BoardPanel rq1 = newBoard(rs1, false, Pieces.WHITE, rgot);
+        for (String m : List.of("e2e4", "d7d5", "b1c3")) rs1.applyMove(find(rs1, m));   // Black may take on e4
+        rq1.setInteractionEnabled(false);
+        click(rq1, sq("c3"));
+        click(rq1, sq("e4"));
+        check("premove: click on an own piece does not premove onto it", !rq1.hasPremove());
+        dragTo(rq1, sq("c3"), sq("e4"));
+        check("premove: dragging onto an own piece records a recapture", "c3e4".equals(rq1.premoveText()) && rgot.isEmpty());
+        rs1.applyMove(find(rs1, "d5e4"));
+        rq1.setInteractionEnabled(true);
+        Move rmv = rq1.consumePremove();
+        check("premove: recapture resolves once the piece was taken", rmv != null && rmv.toString().equals("c3e4") && !rq1.hasPremove());
+
+        GameSession rs2 = new GameSession();
+        BoardPanel rq2 = newBoard(rs2, false, Pieces.WHITE, new ArrayList<>());
+        for (String m : List.of("e2e4", "d7d5", "b1c3")) rs2.applyMove(find(rs2, m));
+        rq2.setInteractionEnabled(false);
+        dragTo(rq2, sq("c3"), sq("e4"));
+        rs2.applyMove(find(rs2, "e7e6"));                                             // the pawn was not taken
+        rq2.setInteractionEnabled(true);
+        check("premove: recapture evaporates when the piece is still there", rq2.consumePremove() == null && !rq2.hasPremove());
+
+        GameSession rs3 = new GameSession();
+        BoardPanel rq3 = newBoard(rs3, false, Pieces.WHITE, new ArrayList<>());
+        rs3.applyMove(find(rs3, "g1f3"));                                             // own knight ahead of the f-pawn
+        rq3.setInteractionEnabled(false);
+        dragTo(rq3, sq("f2"), sq("f3"));
+        check("premove: a pawn cannot be premoved straight onto an own piece", !rq3.hasPremove());
 
         // AI-vs-AI panel (no human colour) never premoves.
         GameSession s2 = new GameSession();

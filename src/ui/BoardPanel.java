@@ -415,7 +415,9 @@ public final class BoardPanel extends JPanel {
         if (hasPremove() && mode == InputMode.MOVE) cancelPremove();
 
         // A press on a highlighted destination completes the move (click-click).
-        if (selectedSquare >= 0 && targetAt(sq) != null) {
+        // Exception: while premoving, a click on an own piece re-selects it —
+        // the recapture premove onto an own piece is entered by dragging.
+        if (selectedSquare >= 0 && targetAt(sq) != null && !(mode == InputMode.PREMOVE && isOwnPiece(sq, mode))) {
             commitMove(selectedSquare, sq, mode, false);
             return;
         }
@@ -607,8 +609,11 @@ public final class BoardPanel extends JPanel {
      * board — the chess.com premove rule. Blockers are ignored (they may
      * move away), pawn captures are always offered (something may land
      * there), castling is offered while the right exists. Squares holding
-     * an own piece are excluded. Legality is re-checked when the premove is
-     * consumed, so an optimistic set here is harmless.
+     * an own piece are offered too — a premove onto one is a recapture,
+     * played only if that piece has been taken in the meantime — except
+     * straight ahead of a pawn, which can never capture there. Legality is
+     * re-checked when the premove is consumed, so an optimistic set here is
+     * harmless.
      */
     private List<Target> premoveTargets(int from) {
         Board b = session.board();
@@ -620,8 +625,13 @@ public final class BoardPanel extends JPanel {
         switch (typeOf(p)) {
             case PAWN -> {
                 int d = c == WHITE ? 1 : -1;
-                addSquare(squares, r + d, f);
-                if (r == (c == WHITE ? 1 : 6)) addSquare(squares, r + 2 * d, f);
+                List<Integer> pushes = new ArrayList<>();
+                addSquare(pushes, r + d, f);
+                if (r == (c == WHITE ? 1 : 6)) addSquare(pushes, r + 2 * d, f);
+                for (int sq : pushes) {                                 // no pushing onto an own piece
+                    int occupant = v[sq];
+                    if (occupant == EMPTY || colorOf(occupant) != c) squares.add(sq);
+                }
                 addSquare(squares, r + d, f - 1);
                 addSquare(squares, r + d, f + 1);
             }
@@ -641,11 +651,7 @@ public final class BoardPanel extends JPanel {
             default -> { }
         }
         List<Target> out = new ArrayList<>();
-        for (int sq : squares) {
-            int occupant = v[sq];
-            if (occupant != EMPTY && colorOf(occupant) == c) continue;
-            out.add(new Target(sq, occupant != EMPTY));
-        }
+        for (int sq : squares) out.add(new Target(sq, v[sq] != EMPTY));
         return out;
     }
 
