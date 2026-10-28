@@ -117,8 +117,9 @@ Pick **Online 1 v 1** on the start screen, type a name and a `host:port`.
 - **The other player opens the address in a browser** — for example
   `http://192.168.1.24:5000` — on any PC, Mac, tablet or phone on the same
   network. No Java, nothing to install: the page is served by your PC and
-  plays over a WebSocket (click or tap to move, legal targets shown,
-  promotion chooser, clocks, resign / draw / rematch). Or they run this
+  plays over a WebSocket (click, tap or drag to move, legal targets shown,
+  premoves and recapture premoves as in the app, promotion chooser,
+  clocks, resign / draw / rematch). Or they run this
   app and pick **Join game** with the same `ip:port`, without the
   `http://`. Both kinds of client can face each other.
 - The browser client keeps no chess rules of its own: it asks the server

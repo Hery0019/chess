@@ -9,7 +9,7 @@
     --bg-top: #3b342e; --bg-bottom: #1b1816; --card: #f8f3ea; --edge: #d6c8b2;
     --text: #2b2520; --muted: #84776a; --light: #f0d9b5; --dark: #b58863;
     --sel: rgba(255, 220, 80, .75); --last: rgba(255, 226, 120, .45); --dot: rgba(40, 30, 20, .35);
-    --green: #81b64c; --green-down: #5e8c33;
+    --green: #81b64c; --green-down: #5e8c33; --pre: rgba(240, 110, 95, .53);
   }
   * { box-sizing: border-box; }
   html, body { margin: 0; min-height: 100%; }
@@ -44,19 +44,24 @@
   .player.active .clock { color: #1a7f37; }
   #board { display: grid; grid-template-columns: repeat(8, 1fr); grid-template-rows: repeat(8, 1fr);
            width: min(92vw, 62vh, 560px); aspect-ratio: 1; border: 2px solid var(--edge); border-radius: 6px;
-           overflow: hidden; user-select: none; touch-action: manipulation; }
+           overflow: hidden; user-select: none; touch-action: none; }
   .sq { position: relative; display: flex; align-items: center; justify-content: center; cursor: pointer; }
   .sq.light { background: var(--light); } .sq.dark { background: var(--dark); }
   .sq.last { box-shadow: inset 0 0 0 100px var(--last); }
+  .sq.pre { box-shadow: inset 0 0 0 100px var(--pre); }
   .sq.sel { box-shadow: inset 0 0 0 100px var(--sel); }
   .sq.target::after { content: ""; width: 26%; height: 26%; border-radius: 50%; background: var(--dot); }
   .sq.target.capture::after { width: 88%; height: 88%; background: none; border: 5px solid var(--dot); }
   .sq .coord { position: absolute; font-size: 10px; font-weight: 700; opacity: .7; }
   .sq .file { right: 3px; bottom: 1px; } .sq .rank { left: 3px; top: 1px; }
   .sq .piece { font-size: min(9vw, 6vh, 54px); line-height: 1; pointer-events: none; }
+  .sq .piece.lifted { opacity: .3; }
+  #ghost { position: fixed; z-index: 5; display: none; pointer-events: none; transform: translate(-50%, -50%);
+           font-size: min(11vw, 7.5vh, 66px); line-height: 1; }
+  #ghost.on { display: block; }
   .piece.w { color: #fbf6ee; text-shadow: 0 0 2px #000, 0 0 2px #000, 1px 1px 0 #2b2520; }
   .piece.b { color: #1f1a16; text-shadow: 0 0 2px #fff8; }
-  .side { display: flex; flex-direction: column; min-width: 220px; max-width: 300px; }
+  .side { display: flex; flex-direction: column; width: 260px; }   /* fixed: a longer status must not shift the board */
   .side h2 { font-size: 15px; margin: 0 0 6px; }
   #moves { flex: 1; min-height: 120px; max-height: 40vh; overflow-y: auto; margin: 0; padding: 6px 8px; background: #fff; border: 1px solid var(--edge); border-radius: 8px;
            font-family: ui-monospace, Consolas, monospace; font-size: 13px; list-style: none; }
@@ -77,7 +82,7 @@
   #promo button { font-size: 40px; line-height: 1; padding: 6px 12px; }
   @media (max-width: 760px) {
     #game.on { flex-direction: column; }
-    .side { max-width: none; }
+    .side { width: auto; }
     .card { padding: 16px; }
   }
 </style>
@@ -117,6 +122,8 @@
 
 <div id="banner"><div><h2 id="bannerTitle"></h2><p id="bannerText"></p><small>tap to look at the position</small></div></div>
 
+<div id="ghost"></div>
+
 <div id="promo"><div>
   <button data-p="q">♛</button><button data-p="r">♜</button><button data-p="b">♝</button><button data-p="n">♞</button>
 </div></div>
@@ -131,8 +138,11 @@
   let me = -1, names = ['', ''], minutes = 0;
   let board = [], stm = 0, legal = [], selected = -1, lastMove = null, moves = [], over = true;
   let remaining = [0, 0], lastTick = 0, pendingPromotion = null, rematchAsked = false, opponentGone = false;
+  /** Premoves: [from, to] pairs queued while the opponent thinks; drag: the piece being pressed / dragged. */
+  let premoves = [], drag = null;
 
   const sqIndex = n => (n.charCodeAt(0) - 97) + 8 * (n.charCodeAt(1) - 49);
+  const sqName = i => FILES[i & 7] + ((i >> 3) + 1);
   const isWhite = p => p === p.toUpperCase();
   const mine = p => p && isWhite(p) === (me === 0);
 
@@ -172,7 +182,7 @@
       case 'WELCOME': setJoinStatus('Connected — waiting for the other player to start…'); break;
       case 'START': startGame(t); break;
       case 'MOVE': applyMove(t[1]); afterMove(); break;
-      case 'LEGAL': legal = t.slice(1); render(); break;
+      case 'LEGAL': legal = t.slice(1); if (!consumePremove()) render(); break;
       case 'RESULT': gameOver(t.slice(2).join(' ')); break;
       case 'RESIGN': gameOver(names[1 - me] + ' resigned — you win'); break;
       case 'TIMEOUT': gameOver(names[1 - me] + ' ran out of time — you win'); break;
@@ -201,7 +211,7 @@
     minutes = parseInt(t[2] || '0', 10) || 0;
     names = [t[3] || 'White', t[4] || 'Black'];
     board = startPosition(); stm = 0; legal = []; selected = -1; lastMove = null; moves = [];
-    over = false; rematchAsked = false; opponentGone = false; pendingPromotion = null;
+    over = false; rematchAsked = false; opponentGone = false; pendingPromotion = null; premoves = []; drag = null;
     remaining = [minutes * 60000, minutes * 60000]; lastTick = performance.now();
     $('join').style.display = 'none';
     $('game').classList.add('on');
@@ -219,8 +229,14 @@
   function afterMove() {
     if (over) return;
     if (stm === me) { send('LEGAL'); setStatus('Your move'); }
-    else setStatus('Waiting for ' + names[1 - me] + '…');
+    else showWaiting();
     render();
+  }
+
+  /** Status while the opponent thinks, echoing the premove queue. */
+  function showWaiting() {
+    setStatus('Waiting for ' + names[1 - me] + '…'
+      + (premoves.length ? ' Premove: ' + premoves.map(([f, t]) => sqName(f) + sqName(t)).join(' ') : ''));
   }
 
   /** Applies a long-algebraic move to the local board: castling rook hop, en passant and promotion included. */
@@ -247,40 +263,199 @@
 
   function play(lan) { send('MOVE ' + lan); applyMove(lan); afterMove(); }
 
-  function onSquare(i) {
-    if (over || stm !== me) return;
-    if (selected >= 0) {
-      const cands = legal.filter(m => sqIndex(m.slice(0, 2)) === selected && sqIndex(m.slice(2, 4)) === i);
-      if (cands.length === 1) { play(cands[0]); return; }
-      if (cands.length > 1) { pendingPromotion = cands; $('promo').classList.add('on'); return; }
+  // ---- input: click-click or drag & drop; premoves while the opponent thinks (as in the Java app) ----
+
+  /** 'move' on my turn, 'premove' on the opponent's, 'none' once the game is over. */
+  const mode = () => over ? 'none' : stm === me ? 'move' : 'premove';
+
+  /**
+   * The board as it will look once the queued premoves are played, applied naively (no legality,
+   * captures overwrite, castling hops the rook, pawns reaching the last rank become queens).
+   */
+  function virtualBoard() {
+    const v = board.slice();
+    for (const [from, to] of premoves) {
+      let p = v[from];
+      if (!mine(p)) continue;
+      const type = p.toLowerCase();
+      v[from] = null;
+      if (type === 'p' && ((to >> 3) === 0 || (to >> 3) === 7)) p = isWhite(p) ? 'Q' : 'q';
+      v[to] = p;
+      if (type === 'k' && Math.abs(to - from) === 2) {
+        const rookFrom = to > from ? from + 3 : from - 4, rookTo = to > from ? from + 1 : from - 1;
+        v[rookTo] = v[rookFrom]; v[rookFrom] = null;
+      }
     }
-    selected = mine(board[i]) && i !== selected ? i : -1;
+    return v;
+  }
+
+  const shownBoard = () => premoves.length ? virtualBoard() : board;
+  const own = sq => mode() !== 'none' && mine(shownBoard()[sq]);
+
+  /** Castling rights without a rules engine: no move ever started or ended on that square. */
+  const untouched = sq => !moves.some(m => sqIndex(m.slice(0, 2)) === sq || sqIndex(m.slice(2, 4)) === sq);
+
+  const KNIGHT = [[1, 2], [2, 1], [2, -1], [1, -2], [-1, -2], [-2, -1], [-2, 1], [-1, 2]];
+  const KING = [[1, 0], [1, 1], [0, 1], [-1, 1], [-1, 0], [-1, -1], [0, -1], [1, -1]];
+  const DIAG = [[1, 1], [1, -1], [-1, 1], [-1, -1]], ORTHO = [[1, 0], [-1, 0], [0, 1], [0, -1]];
+
+  /**
+   * Squares the piece could reach on an otherwise empty board — the chess.com premove rule: blockers
+   * are ignored, pawn captures are always offered, castling while king and rook never moved. Squares
+   * holding an own piece are offered too (a recapture, played only if that piece has been taken),
+   * except straight ahead of a pawn. Legality is checked when the premove is played.
+   */
+  function premoveTargets(from) {
+    const v = virtualBoard(), p = v[from], out = new Set();
+    if (!mine(p)) return out;
+    const white = isWhite(p), r = from >> 3, f = from & 7;
+    const add = (rr, ff) => { if (rr >= 0 && rr < 8 && ff >= 0 && ff < 8) out.add(rr * 8 + ff); };
+    const rays = dirs => {
+      for (const [dr, df] of dirs) for (let rr = r + dr, ff = f + df; rr >= 0 && rr < 8 && ff >= 0 && ff < 8; rr += dr, ff += df) out.add(rr * 8 + ff);
+    };
+    switch (p.toLowerCase()) {
+      case 'p': {
+        const d = white ? 1 : -1;
+        for (const rr of r === (white ? 1 : 6) ? [r + d, r + 2 * d] : [r + d]) if (!mine(v[rr * 8 + f])) add(rr, f);
+        add(r + d, f - 1); add(r + d, f + 1);
+        break;
+      }
+      case 'n': for (const [dr, df] of KNIGHT) add(r + dr, f + df); break;
+      case 'b': rays(DIAG); break;
+      case 'r': rays(ORTHO); break;
+      case 'q': rays(DIAG); rays(ORTHO); break;
+      case 'k': {
+        for (const [dr, df] of KING) add(r + dr, f + df);
+        const home = white ? 4 : 60;
+        if (from === home && untouched(home)) {
+          if (untouched(home + 3)) out.add(home + 2);
+          if (untouched(home - 4)) out.add(home - 2);
+        }
+      }
+    }
+    return out;
+  }
+
+  function targetsOf(sq) {
+    if (mode() === 'premove') return premoveTargets(sq);
+    return new Set(legal.filter(m => sqIndex(m.slice(0, 2)) === sq).map(m => sqIndex(m.slice(2, 4))));
+  }
+
+  /** A real move (the promotion chooser opens when several match) or, while waiting, one more premove. */
+  function commit(from, to) {
+    selected = -1;
+    if (mode() === 'premove') { premoves.push([from, to]); showWaiting(); render(); return; }
+    const cands = legal.filter(m => sqIndex(m.slice(0, 2)) === from && sqIndex(m.slice(2, 4)) === to);
+    if (cands.length === 1) play(cands[0]);
+    else if (cands.length > 1) { pendingPromotion = cands; $('promo').classList.add('on'); render(); }
+  }
+
+  /**
+   * My turn has come and my legal moves are known: plays the first queued premove if a legal move
+   * matches it (a queen on promotion); otherwise drops the whole queue, planned on top of it.
+   */
+  function consumePremove() {
+    if (!premoves.length || mode() !== 'move') return false;
+    const [from, to] = premoves.shift();
+    const cands = legal.filter(m => sqIndex(m.slice(0, 2)) === from && sqIndex(m.slice(2, 4)) === to);
+    const pick = cands.find(m => m[4] === 'q') || cands[0];
+    if (!pick) { premoves = []; return false; }
+    play(pick);
+    return true;
+  }
+
+  function cancelPremoves() {
+    if (!premoves.length) return;
+    premoves = [];
+    if (mode() === 'premove') showWaiting();
+  }
+
+  function squareAt(x, y) {
+    const r = $('board').getBoundingClientRect();
+    const col = Math.floor((x - r.left) / r.width * 8), row = Math.floor((y - r.top) / r.height * 8);
+    if (col < 0 || col > 7 || row < 0 || row > 7) return -1;
+    return (me === 1 ? row : 7 - row) * 8 + (me === 1 ? 7 - col : col);
+  }
+
+  function onPress(e) {
+    if (e.button === 2) { cancelPremoves(); selected = -1; render(); return; }   // right button: drop the premoves
+    const sq = squareAt(e.clientX, e.clientY);
+    if (e.button !== 0 || mode() === 'none' || sq < 0) return;
+    // On my turn a click drops leftover premoves; while waiting, a click on an own piece or a
+    // destination extends the queue and anything else clears it.
+    if (mode() === 'move') cancelPremoves();
+    // A destination completes the move — except that while premoving a click on an own piece
+    // re-selects it: the recapture premove onto an own piece is entered by dragging.
+    if (selected >= 0 && targetsOf(selected).has(sq) && !(mode() === 'premove' && own(sq))) { commit(selected, sq); return; }
+    if (!own(sq)) cancelPremoves();
+    if (own(sq)) {
+      selected = sq;
+      drag = { from: sq, x: e.clientX, y: e.clientY, moving: false };
+      $('board').setPointerCapture(e.pointerId);
+    } else {
+      selected = -1;
+    }
     render();
+  }
+
+  function onDrag(e) {
+    if (!drag) return;
+    if (!drag.moving) {
+      if (Math.hypot(e.clientX - drag.x, e.clientY - drag.y) < 4) return;
+      const p = shownBoard()[drag.from];
+      if (!p) return;
+      drag.moving = true;
+      $('ghost').textContent = GLYPH[p.toLowerCase()];
+      $('ghost').className = 'piece on ' + (isWhite(p) ? 'w' : 'b');
+      render();
+    }
+    $('ghost').style.left = e.clientX + 'px';
+    $('ghost').style.top = e.clientY + 'px';
+  }
+
+  function onRelease(e) {
+    if (!drag) return;
+    const { from, moving } = drag;
+    endDrag();
+    if (!moving) return;                                   // a plain click: the selection stands
+    const sq = squareAt(e.clientX, e.clientY);
+    if (mode() === 'none' || selected !== from) selected = -1;   // the turn changed mid-drag
+    else if (sq === from) { /* dropped back: stays selected, click-click can finish */ }
+    else if (sq >= 0 && targetsOf(from).has(sq)) { commit(from, sq); return; }
+    else selected = -1;                                    // snap back
+    render();
+  }
+
+  function endDrag() {
+    const wasMoving = drag && drag.moving;
+    drag = null;
+    $('ghost').className = '';
+    if (wasMoving) render();
   }
 
   // ---- rendering ----
   function render() {
     const el = $('board');
     el.innerHTML = '';
-    const targets = new Set(selected >= 0 ? legal.filter(m => sqIndex(m.slice(0, 2)) === selected).map(m => sqIndex(m.slice(2, 4))) : []);
+    const shown = shownBoard(), targets = selected >= 0 ? targetsOf(selected) : new Set(), pre = new Set(premoves.flat());
     for (let row = 0; row < 8; row++) {
       for (let col = 0; col < 8; col++) {
         const rank = me === 1 ? row : 7 - row, file = me === 1 ? 7 - col : col, i = rank * 8 + file;
         const d = document.createElement('div');
         d.className = 'sq ' + (((rank + file) & 1) ? 'light' : 'dark');
         if (lastMove && (lastMove[0] === i || lastMove[1] === i)) d.classList.add('last');
+        if (pre.has(i)) d.classList.add('pre');
         if (i === selected) d.classList.add('sel');
-        if (targets.has(i)) { d.classList.add('target'); if (board[i]) d.classList.add('capture'); }
+        if (targets.has(i)) { d.classList.add('target'); if (shown[i]) d.classList.add('capture'); }
         if (row === 7) d.insertAdjacentHTML('beforeend', '<span class="coord file">' + FILES[file] + '</span>');
         if (col === 0) d.insertAdjacentHTML('beforeend', '<span class="coord rank">' + (rank + 1) + '</span>');
-        const p = board[i];
+        const p = shown[i];
         if (p) {
           const s = document.createElement('span');
-          s.className = 'piece ' + (isWhite(p) ? 'w' : 'b');
+          s.className = 'piece ' + (isWhite(p) ? 'w' : 'b') + (drag && drag.moving && drag.from === i ? ' lifted' : '');
           s.textContent = GLYPH[p.toLowerCase()];
           d.appendChild(s);
         }
-        d.addEventListener('click', () => onSquare(i));
         el.appendChild(d);
       }
     }
@@ -321,7 +496,8 @@
   }
 
   function gameOver(text) {
-    over = true; legal = []; selected = -1; pendingPromotion = null;
+    over = true; legal = []; selected = -1; pendingPromotion = null; premoves = [];
+    endDrag();
     $('promo').classList.remove('on');
     setStatus(text);
     showBanner(text);
@@ -361,6 +537,11 @@
   }
   $('promo').addEventListener('click', e => { if (e.target === $('promo')) { $('promo').classList.remove('on'); pendingPromotion = null; } });
   $('banner').addEventListener('click', () => $('banner').classList.remove('on'));
+  $('board').addEventListener('pointerdown', onPress);
+  $('board').addEventListener('pointermove', onDrag);
+  $('board').addEventListener('pointerup', onRelease);
+  $('board').addEventListener('pointercancel', endDrag);
+  $('board').addEventListener('contextmenu', e => e.preventDefault());
   $('name').focus();
 })();
 </script>
