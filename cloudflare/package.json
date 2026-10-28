@@ -1,0 +1,18 @@
+{
+  "name": "chess-cloudflare",
+  "private": true,
+  "type": "module",
+  "description": "Online 1 v 1 chess server on Cloudflare Workers + Durable Objects (port of net.ChessServer)",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "check": "tsc --noEmit",
+    "test": "node --test \"test/*.test.ts\""
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "5.20261028.1",
+    "@types/node": "24.19.2",
+    "typescript": "7.0.2",
+    "wrangler": "4.154.0"
+  }
+}

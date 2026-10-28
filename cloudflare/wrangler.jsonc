@@ -1,0 +1,15 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "chess",
+  "main": "src/worker.ts",
+  "compatibility_date": "2026-10-01",
+  // The browser client is the very page the Java server embeds.
+  "assets": { "directory": "../src/web" },
+  "routes": [{ "pattern": "chess.byhery.com", "custom_domain": true }],
+  "durable_objects": {
+    "bindings": [{ "name": "LOBBY", "class_name": "Lobby" }]
+  },
+  // SQLite-backed classes are the ones the Free plan allows (no storage is used).
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["Lobby"] }],
+  "observability": { "enabled": true }
+}

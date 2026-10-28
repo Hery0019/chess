@@ -1,2 +1,4 @@
 /out
 /chess.jar
+/cloudflare/node_modules/
+/cloudflare/.wrangler/

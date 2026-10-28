@@ -145,6 +145,42 @@ Pick **Online 1 v 1** on the start screen, type a name and a `host:port`.
   Internet the host's router needs a port forward. Names travel in clear —
   there is no encryption or authentication (LAN / friends use).
 
+## Online on Cloudflare (free, no PC left on)
+
+`cloudflare/` runs the same online server on Cloudflare Workers + one
+Durable Object, within the Free plan: players open the site's address,
+type a name and are paired two by two in arrival order, exactly as with
+`app.ServerMain`. The page is `src/web/index.html` itself (served as a
+static asset), and the protocol is unchanged.
+
+- `src/rules.ts` is a port of `Board`, `MoveGenerator` and the
+  adjudication of `GameSession` (legal moves, mate / stalemate, threefold
+  repetition, fifty moves, dead positions, timeout vs bare king) — no
+  search: the AI stays in the Java app. `src/server.ts` is
+  `ChessServer`'s pairing and rooms without the sockets; `src/worker.ts`
+  wires them to WebSockets.
+- Browser players only: the Java app's **Join game** speaks raw TCP, which
+  Cloudflare does not carry.
+- State is in memory. The object stays loaded while a socket is open
+  (clients ping every 5 s, so hibernation would not help), and a deploy
+  ends the games in progress. Free-plan headroom: about 28 hours a day of
+  "someone is connected", 100 000 requests a day.
+
+```bash
+cd cloudflare
+npm ci
+npm test                 # perft (same positions as PerftTest), adjudication, protocol scenarios
+npm run check            # TypeScript
+npm run dev              # local Workers runtime on http://localhost:8787
+npx wrangler login       # once: authorises wrangler on your Cloudflare account
+npm run deploy           # publishes https://chess.<your-subdomain>.workers.dev
+```
+
+For your own domain (one already on Cloudflare), add
+`"routes": [{ "pattern": "chess.example.com", "custom_domain": true }]` to
+`cloudflare/wrangler.jsonc` and deploy again, or add it in the dashboard
+under the Worker's *Settings → Domains & Routes*.
+
 ## Build & run
 
 ```bash
@@ -220,6 +256,8 @@ ui/       MainFrame, StartScreen, OnlineLobbyPanel, GamePanel, BoardPanel,
           through GameSession. MainFrame owns the online connection.
 app/      Main (EDT bootstrap), ServerMain (standalone relay server)
 test/     PerftTest, EngineTests, UiTests, NetTests
+web/      index.html — the browser client (served by ChessServer and by cloudflare/)
+cloudflare/  TypeScript port of the online server for Workers + Durable Objects
 ```
 
 ### Threading model
@@ -364,6 +402,8 @@ v3 reaches depth 10 in 0.4–2.8 s on typical middlegames, where v2 needed
    alpha-beta at the same depth would see. Accepted because the depth they
    buy wins far more games than those misses lose — that is what
    `test.Arena` is for, and every technique can be switched off there.
-4. **Online play is unencrypted and unauthenticated**; clocks are not
+4. **Online play is unauthenticated, and unencrypted** except on
+   Cloudflare (HTTPS / WSS); the referee's rules exist twice (Java and
+   `cloudflare/src/rules.ts`), kept honest by the same perft counts; clocks are not
    latency-compensated; there is no takeback, chat or reconnection to a
    game in progress (a dropped connection forfeits or aborts the game).
