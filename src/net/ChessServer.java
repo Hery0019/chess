@@ -24,6 +24,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.regex.Pattern;
 
 import static net.Protocol.*;
 
@@ -149,9 +150,11 @@ public final class ChessServer implements Closeable {
         @Override public void close() { }
     }
 
-    /** Minimal HTTP: the web page, and the WebSocket upgrade for {@code /ws}. */
+    /** Minimal HTTP: the web page, its piece images, and the WebSocket upgrade for {@code /ws}. */
     private static final class Http {
         private static volatile byte[] page;
+        /** The piece images the page loads, e.g. /pieces/wK.svg. */
+        private static final Pattern PIECE_IMAGE = Pattern.compile("/pieces/[wb][KQRBNP]\\.svg");
 
         /** @return a WebSocket transport after a successful upgrade, or null once a response was written */
         static Transport serve(BufferedInputStream in, OutputStream out) throws IOException {
@@ -192,6 +195,12 @@ public final class ChessServer implements Closeable {
                 else respond(out, 200, "text/html; charset=utf-8", method.equals("HEAD") ? new byte[0] : body);
                 return null;
             }
+            if (PIECE_IMAGE.matcher(path).matches()) {         // whitelisted names only: no path traversal
+                byte[] body = resource("/web" + path);
+                if (body == null) respond(out, 404, "text/plain", "not found".getBytes(StandardCharsets.UTF_8));
+                else respond(out, 200, "image/svg+xml", method.equals("HEAD") ? new byte[0] : body);
+                return null;
+            }
             respond(out, 404, "text/plain", "not found".getBytes(StandardCharsets.UTF_8));
             return null;
         }
@@ -199,10 +208,12 @@ public final class ChessServer implements Closeable {
         private static byte[] page() {
             byte[] p = page;
             if (p != null) return p;
-            try (InputStream res = ChessServer.class.getResourceAsStream(WEB_PAGE)) {
-                if (res == null) return null;
-                page = p = res.readAllBytes();
-                return p;
+            return page = resource(WEB_PAGE);
+        }
+
+        private static byte[] resource(String name) {
+            try (InputStream res = ChessServer.class.getResourceAsStream(name)) {
+                return res == null ? null : res.readAllBytes();
             } catch (IOException e) {
                 return null;
             }
