@@ -23,7 +23,7 @@ javac --release 21 -Xlint:all,-serial -d out $(find src -name "*.java")
 
 # The browser client is a resource: copy it next to the classes so both `-cp out` and the jar find it.
 mkdir -p out/web
-cp src/web/* out/web/
+cp -R src/web/. out/web/
 
 printf 'Main-Class: app.Main\n' > out/MANIFEST.MF
 "$JAR" --create --file chess.jar --manifest out/MANIFEST.MF \

@@ -7,7 +7,7 @@
 <style>
   :root {
     --bg-top: #3b342e; --bg-bottom: #1b1816; --card: #f8f3ea; --edge: #d6c8b2;
-    --text: #2b2520; --muted: #84776a; --light: #f0d9b5; --dark: #b58863;
+    --text: #2b2520; --muted: #84776a; --light: #eeeed2; --dark: #769656;
     --sel: rgba(255, 220, 80, .75); --last: rgba(255, 226, 120, .45); --dot: rgba(40, 30, 20, .35);
     --green: #81b64c; --green-down: #5e8c33; --pre: rgba(240, 110, 95, .53);
   }
@@ -50,17 +50,18 @@
   .sq.last { box-shadow: inset 0 0 0 100px var(--last); }
   .sq.pre { box-shadow: inset 0 0 0 100px var(--pre); }
   .sq.sel { box-shadow: inset 0 0 0 100px var(--sel); }
-  .sq.target::after { content: ""; width: 26%; height: 26%; border-radius: 50%; background: var(--dot); }
+  .sq.target::after { content: ""; position: absolute; inset: 0; margin: auto; width: 26%; height: 26%; border-radius: 50%; background: var(--dot); }
   .sq.target.capture::after { width: 88%; height: 88%; background: none; border: 5px solid var(--dot); }
-  .sq .coord { position: absolute; font-size: 10px; font-weight: 700; opacity: .7; }
+  .sq .coord { position: absolute; font-size: 10px; font-weight: 700; }
+  .sq.light .coord { color: var(--dark); } .sq.dark .coord { color: var(--light); }
   .sq .file { right: 3px; bottom: 1px; } .sq .rank { left: 3px; top: 1px; }
-  .sq .piece { font-size: min(9vw, 6vh, 54px); line-height: 1; pointer-events: none; }
+  .piece { display: block; pointer-events: none; -webkit-user-drag: none; }
+  .sq .piece { width: 100%; height: 100%; }
   .sq .piece.lifted { opacity: .3; }
   #ghost { position: fixed; z-index: 5; display: none; pointer-events: none; transform: translate(-50%, -50%);
-           font-size: min(11vw, 7.5vh, 66px); line-height: 1; }
+           width: min(13vw, 9vh, 80px); height: min(13vw, 9vh, 80px); }
+  #ghost .piece { width: 100%; height: 100%; }
   #ghost.on { display: block; }
-  .piece.w { color: #fbf6ee; text-shadow: 0 0 2px #000, 0 0 2px #000, 1px 1px 0 #2b2520; }
-  .piece.b { color: #1f1a16; text-shadow: 0 0 2px #fff8; }
   .side { display: flex; flex-direction: column; width: 260px; }   /* fixed: a longer status must not shift the board */
   .side h2 { font-size: 15px; margin: 0 0 6px; }
   #moves { flex: 1; min-height: 120px; max-height: 40vh; overflow-y: auto; margin: 0; padding: 6px 8px; background: #fff; border: 1px solid var(--edge); border-radius: 8px;
@@ -79,7 +80,8 @@
   #promo { position: fixed; inset: 0; display: none; align-items: center; justify-content: center; background: rgba(0,0,0,.45); }
   #promo.on { display: flex; }
   #promo div { background: var(--card); padding: 14px; border-radius: 14px; display: flex; gap: 10px; }
-  #promo button { font-size: 40px; line-height: 1; padding: 6px 12px; }
+  #promo button { padding: 6px; }
+  #promo .piece { width: 56px; height: 56px; }
   @media (max-width: 760px) {
     #game.on { flex-direction: column; }
     .side { width: auto; }
@@ -125,7 +127,7 @@
 <div id="ghost"></div>
 
 <div id="promo"><div>
-  <button data-p="q">♛</button><button data-p="r">♜</button><button data-p="b">♝</button><button data-p="n">♞</button>
+  <button data-p="q"></button><button data-p="r"></button><button data-p="b"></button><button data-p="n"></button>
 </div></div>
 
 <script>
@@ -133,7 +135,21 @@
   // ---- protocol: the same text lines as the Java app, over a WebSocket ----
   const $ = id => document.getElementById(id);
   const FILES = 'abcdefgh';
-  const GLYPH = { k: '♚', q: '♛', r: '♜', b: '♝', n: '♞', p: '♟' };
+  /**
+   * A piece image (Staunty set, served next to this page): 'N' -> pieces/wN.svg, 'n' -> pieces/bN.svg.
+   * Each render rebuilds the board, and fresh <img> tags on a plain URL are fetched again (the
+   * page is served no-cache), which flashes empty squares: the files are read once into data
+   * URLs, which the browser reuses at once. The plain URL only serves until they arrive.
+   */
+  const PIECE_SRC = {};
+  for (const c of 'wb') for (const t of 'KQRBNP') {
+    fetch('pieces/' + c + t + '.svg').then(r => r.ok ? r.text() : Promise.reject())
+      .then(svg => { PIECE_SRC[c + t] = 'data:image/svg+xml,' + encodeURIComponent(svg); }, () => {});
+  }
+  const pieceImg = p => {
+    const key = (isWhite(p) ? 'w' : 'b') + p.toUpperCase();
+    return '<img class="piece" alt="" draggable="false" src="' + (PIECE_SRC[key] || 'pieces/' + key + '.svg') + '">';
+  };
   let ws = null, pingTimer = null, clockTimer = null;
   let me = -1, names = ['', ''], minutes = 0;
   let board = [], stm = 0, legal = [], selected = -1, lastMove = null, moves = [], over = true;
@@ -347,7 +363,12 @@
     if (mode() === 'premove') { premoves.push([from, to]); showWaiting(); render(); return; }
     const cands = legal.filter(m => sqIndex(m.slice(0, 2)) === from && sqIndex(m.slice(2, 4)) === to);
     if (cands.length === 1) play(cands[0]);
-    else if (cands.length > 1) { pendingPromotion = cands; $('promo').classList.add('on'); render(); }
+    else if (cands.length > 1) { pendingPromotion = cands; showPromotion(); render(); }
+  }
+
+  function showPromotion() {
+    for (const b of $('promo').querySelectorAll('button')) b.innerHTML = pieceImg(me === 1 ? b.dataset.p : b.dataset.p.toUpperCase());
+    $('promo').classList.add('on');
   }
 
   /**
@@ -405,8 +426,8 @@
       const p = shownBoard()[drag.from];
       if (!p) return;
       drag.moving = true;
-      $('ghost').textContent = GLYPH[p.toLowerCase()];
-      $('ghost').className = 'piece on ' + (isWhite(p) ? 'w' : 'b');
+      $('ghost').innerHTML = pieceImg(p);
+      $('ghost').className = 'on';
       render();
     }
     $('ghost').style.left = e.clientX + 'px';
@@ -451,10 +472,8 @@
         if (col === 0) d.insertAdjacentHTML('beforeend', '<span class="coord rank">' + (rank + 1) + '</span>');
         const p = shown[i];
         if (p) {
-          const s = document.createElement('span');
-          s.className = 'piece ' + (isWhite(p) ? 'w' : 'b') + (drag && drag.moving && drag.from === i ? ' lifted' : '');
-          s.textContent = GLYPH[p.toLowerCase()];
-          d.appendChild(s);
+          d.insertAdjacentHTML('beforeend', pieceImg(p));
+          if (drag && drag.moving && drag.from === i) d.lastChild.classList.add('lifted');
         }
         el.appendChild(d);
       }

@@ -77,8 +77,8 @@ import static engine.Pieces.*;
  */
 public final class BoardPanel extends JPanel {
 
-    private static final Color LIGHT_SQ = new Color(0xF0, 0xD9, 0xB5);
-    private static final Color DARK_SQ = new Color(0xB5, 0x88, 0x63);
+    private static final Color LIGHT_SQ = new Color(0xEE, 0xEE, 0xD2);
+    private static final Color DARK_SQ = new Color(0x76, 0x96, 0x56);
     private static final Color SELECTED = new Color(0x3A, 0x7B, 0xD5, 140);
     private static final Color LAST_MOVE = new Color(0xF7, 0xEC, 0x5D, 110);
     private static final Color CHECK = new Color(0xD9, 0x2B, 0x2B, 150);
@@ -145,7 +145,7 @@ public final class BoardPanel extends JPanel {
         this.flipped = flipped;
         this.humanColor = humanColor;
         this.moveConsumer = moveConsumer;
-        this.renderer = UnicodePieceRenderer.createBest();
+        this.renderer = SvgPieceRenderer.createBest();
         setPreferredSize(new Dimension(560, 560));
         MouseAdapter mouse = new MouseAdapter() {
             @Override public void mousePressed(MouseEvent e)  { onPress(e); }

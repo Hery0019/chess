@@ -88,7 +88,7 @@ public final class StartScreen extends JPanel {
 
     private static final int CONTENT_WIDTH = 400;
 
-    private final PieceRenderer renderer = UnicodePieceRenderer.createBest();
+    private final PieceRenderer renderer = SvgPieceRenderer.createBest();
     private JButton defaultButton;
 
     /** Combo entry: minutes per side, {@link GameConfig#NO_CLOCK} for untimed. */

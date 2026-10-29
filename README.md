@@ -294,7 +294,7 @@ killed.
 | Tapered king MG/EG tables | A hard phase switch causes eval discontinuities and move flip-flop | A few extra multiplies per eval |
 | No mobility term | Requires movegen inside the hottest function; poor value at this depth | Weaker positional play |
 | All draws auto-declared | No claim UI; unambiguous verdicts | Diverges from OTB claim rules (accepted spec) |
-| Unicode glyph rendering behind `PieceRenderer` | No binary assets in a source deliverable; font scan + letter fallback | Glyph aesthetics vary by platform; image renderer is a drop-in later |
+| Piece images: the SVG set in `src/web/pieces/`, read by a minimal SVG reader (`SvgPieceRenderer`) behind `PieceRenderer` | One set of files for the Swing app and the browser client; vector, so crisp at any size; no library | The reader only knows the subset these files use (`path`, `rect`, flat colours); anything else falls back to the Unicode glyphs |
 | Premoves = queue of (from, to) pairs, each resolved against the legal list when its turn arrives | Never submits an illegal move; no engine changes; a stale premove drops the queue | Later premoves are entered on a naively projected board (no legality); auto-queen on promotion; played by a one-shot timer after the AI move's slide |
 | Move animation paints the post-move board with the moving piece interpolated | No intermediate game state, nothing to roll back; a takeback mid-slide just draws the restored board | Captured piece vanishes at the start of the slide rather than on arrival |
 | Online: the server referees with its own `GameSession` and relays only legal, in-turn moves | Two honest clients can never diverge; a tampered client cannot cheat with nonsense; the engine's rules are reused unchanged | One extra move generation per move on the server; a desync (should never happen) aborts the game rather than guessing |
@@ -408,3 +408,10 @@ v3 reaches depth 10 in 0.4–2.8 s on typical middlegames, where v2 needed
    `cloudflare/src/rules.ts`), kept honest by the same perft counts; clocks are not
    latency-compensated; there is no takeback, chat or reconnection to a
    game in progress (a dropped connection forfeits or aborts the game).
+
+## Credits
+
+The pieces are the **Staunty** set by sadsnake1, as distributed with
+[lichess](https://github.com/lichess-org/lila/tree/master/public/piece/staunty),
+licensed under [CC BY-NC-SA 4.0](https://creativecommons.org/licenses/by-nc-sa/4.0/):
+free to use and adapt with attribution, not for commercial use.
